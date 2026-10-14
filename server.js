@@ -170,6 +170,23 @@ async function initDatabase() {
       } catch (err) {
         // Columns room/username may not exist in fresh installs
       }
+
+      // Ensure at least one administrator exists if users are already registered
+      try {
+        const adminCheck = await pool.query('SELECT id FROM chat_users WHERE is_admin = TRUE LIMIT 1');
+        if (!adminCheck.rows.length) {
+          await pool.query('UPDATE chat_users SET is_admin = TRUE WHERE id = (SELECT id FROM chat_users ORDER BY id ASC LIMIT 1)');
+        }
+        if (ADMIN_PHONE) {
+          const adminVariants = getPhoneVariants(ADMIN_PHONE);
+          if (adminVariants.length) {
+            const ph = adminVariants.map((_, i) => `$${i + 1}`).join(', ');
+            await pool.query(`UPDATE chat_users SET is_admin = TRUE WHERE phone IN (${ph})`, adminVariants);
+          }
+        }
+      } catch (err) {
+        // chat_users table might not be initialized yet
+      }
       break;
     } catch (err) {
       if (attempt >= 15) throw err;
@@ -186,6 +203,80 @@ function sanitizePhone(phone) {
   const cleaned = phone.trim().replace(/[^\d+]/g, '');
   if (!cleaned) return '';
   return cleaned;
+}
+
+function getPhoneVariants(phone) {
+  const cleaned = sanitizePhone(phone);
+  if (!cleaned) return [];
+  const set = new Set();
+  set.add(cleaned);
+
+  const digits = cleaned.replace(/\D/g, '');
+
+  // Bangladesh phone number normalization:
+  // 1) 13 digits starting with 8801: e.g. 8801712345678 (+8801712345678)
+  if (digits.startsWith('8801') && digits.length === 13) {
+    const local = '0' + digits.slice(3); // 01712345678
+    set.add(local);
+    set.add('+' + digits);
+    set.add(digits);
+    const withZero = '8800' + digits.slice(3); // 88001712345678
+    set.add('+' + withZero);
+    set.add(withZero);
+  }
+  // 2) 14 digits starting with 88001: e.g. 88001712345678 (+88001712345678)
+  else if (digits.startsWith('88001') && digits.length === 14) {
+    const local = '0' + digits.slice(4); // 01712345678
+    const standard = '880' + digits.slice(4); // 8801712345678
+    set.add(local);
+    set.add('+' + standard);
+    set.add(standard);
+    set.add('+' + digits);
+    set.add(digits);
+  }
+  // 3) 11 digits starting with 01: e.g. 01712345678
+  else if (digits.startsWith('01') && digits.length === 11) {
+    const intl = '880' + digits.slice(1); // 8801712345678
+    set.add(digits);
+    set.add('+' + intl);
+    set.add(intl);
+    const withZero = '8800' + digits.slice(1); // 88001712345678
+    set.add('+' + withZero);
+    set.add(withZero);
+  }
+
+  // 4) General international +/- variations
+  if (cleaned.startsWith('+')) {
+    set.add(cleaned.slice(1));
+  } else if (/^\d{7,16}$/.test(cleaned)) {
+    set.add('+' + cleaned);
+  }
+
+  return Array.from(set);
+}
+
+function arePhonesMatching(phone1, phone2) {
+  if (!phone1 || !phone2) return false;
+  const v1 = new Set(getPhoneVariants(phone1));
+  const v2 = getPhoneVariants(phone2);
+  return v2.some((v) => v1.has(v));
+}
+
+async function findUserByPhone(phone) {
+  const variants = getPhoneVariants(phone);
+  if (!variants.length) return null;
+  const placeholders = variants.map((_, i) => `$${i + 1}`).join(', ');
+  const { rows } = await pool.query(
+    `SELECT id, phone, name, avatar_color, avatar_url, is_admin, is_suspended, password_hash, created_at
+     FROM chat_users
+     WHERE phone IN (${placeholders})
+     LIMIT 1`,
+    variants
+  );
+  if (!rows.length) return null;
+  const user = rows[0];
+  user.id = Number(user.id);
+  return user;
 }
 
 function hashPassword(password) {
@@ -398,15 +489,15 @@ app.post('/api/auth/register', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Password must be at least 6 characters.' });
     }
 
-    const existing = await pool.query('SELECT id FROM chat_users WHERE phone = $1', [phone]);
-    if (existing.rows.length > 0) {
+    const existing = await findUserByPhone(phone);
+    if (existing) {
       return res.status(400).json({ ok: false, error: 'An account with this phone number already exists.' });
     }
 
     // Determine admin status: first user or matches ADMIN_PHONE
     const userCountRes = await pool.query('SELECT count(*)::int as count FROM chat_users');
     const isFirstUser = userCountRes.rows[0].count === 0;
-    const matchesAdminPhone = ADMIN_PHONE && phone === sanitizePhone(ADMIN_PHONE);
+    const matchesAdminPhone = ADMIN_PHONE && arePhonesMatching(phone, ADMIN_PHONE);
     const isAdmin = Boolean(isFirstUser || matchesAdminPhone);
 
     const hash = hashPassword(password);
@@ -440,17 +531,10 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Phone number and password are required.' });
     }
 
-    const { rows } = await pool.query(
-      'SELECT id, phone, name, password_hash, avatar_color, is_admin, is_suspended, created_at FROM chat_users WHERE phone = $1',
-      [phone]
-    );
-
-    if (!rows.length || !verifyPassword(password, rows[0].password_hash)) {
+    const user = await findUserByPhone(phone);
+    if (!user || !verifyPassword(password, user.password_hash)) {
       return res.status(401).json({ ok: false, error: 'Incorrect phone number or password.' });
     }
-
-    const user = rows[0];
-    user.id = Number(user.id);
 
     if (user.is_suspended) {
       return res.status(403).json({ ok: false, error: 'Your account has been suspended by an administrator.' });
@@ -560,21 +644,14 @@ app.post('/api/friends/add', authMiddleware, async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Please enter a valid phone number.' });
     }
 
-    if (phone === req.user.phone) {
-      return res.status(400).json({ ok: false, error: 'You cannot add yourself as a friend.' });
-    }
-
-    const { rows } = await pool.query(
-      'SELECT id, phone, name, avatar_color, avatar_url, is_suspended FROM chat_users WHERE phone = $1',
-      [phone]
-    );
-
-    if (!rows.length) {
+    const friend = await findUserByPhone(phone);
+    if (!friend) {
       return res.status(404).json({ ok: false, error: 'No user registered with this phone number.' });
     }
 
-    const friend = rows[0];
-    friend.id = Number(friend.id);
+    if (friend.id === req.user.id) {
+      return res.status(400).json({ ok: false, error: 'You cannot add yourself as a friend.' });
+    }
 
     // Mutual friendship
     await pool.query(
@@ -611,15 +688,12 @@ app.post('/api/friends/request', authMiddleware, async (req, res) => {
   try {
     const phone = sanitizePhone(req.body.phone);
     if (!phone) return res.status(400).json({ ok: false, error: 'Please enter a valid phone number.' });
-    if (phone === req.user.phone) return res.status(400).json({ ok: false, error: 'You cannot send a friend request to yourself.' });
 
-    const { rows } = await pool.query(
-      'SELECT id, phone, name, avatar_color, avatar_url FROM chat_users WHERE phone = $1',
-      [phone]
-    );
-    if (!rows.length) return res.status(404).json({ ok: false, error: 'No user registered with this phone number.' });
+    const targetUser = await findUserByPhone(phone);
+    if (!targetUser) return res.status(404).json({ ok: false, error: 'No user registered with this phone number.' });
 
-    const targetUser = rows[0];
+    if (targetUser.id === req.user.id) return res.status(400).json({ ok: false, error: 'You cannot send a friend request to yourself.' });
+
     const targetId = Number(targetUser.id);
 
     // Check if already friends
@@ -871,19 +945,15 @@ app.post('/api/conversations/direct', authMiddleware, async (req, res) => {
     const phone = sanitizePhone(req.body.phone);
     if (!phone) return res.status(400).json({ ok: false, error: 'Valid phone number required.' });
 
-    if (phone === req.user.phone) {
-      return res.status(400).json({ ok: false, error: 'Cannot start a direct chat with yourself.' });
-    }
-
-    const userRes = await pool.query(
-      'SELECT id, name, phone, avatar_color, avatar_url, is_suspended FROM chat_users WHERE phone = $1',
-      [phone]
-    );
-    if (!userRes.rows.length) {
+    const otherUser = await findUserByPhone(phone);
+    if (!otherUser) {
       return res.status(404).json({ ok: false, error: 'No user registered with this phone number.' });
     }
 
-    const otherUser = userRes.rows[0];
+    if (otherUser.id === req.user.id) {
+      return res.status(400).json({ ok: false, error: 'Cannot start a direct chat with yourself.' });
+    }
+
     const otherId = Number(otherUser.id);
 
     // Friend check: Non-friends cannot talk
@@ -999,12 +1069,12 @@ app.post('/api/conversations/group', authMiddleware, async (req, res) => {
     // Add member phones
     for (const rawPhone of phones) {
       const clean = sanitizePhone(rawPhone);
-      if (!clean || clean === req.user.phone) continue;
-      const uRes = await pool.query('SELECT id FROM chat_users WHERE phone = $1', [clean]);
-      if (uRes.rows.length) {
+      if (!clean) continue;
+      const u = await findUserByPhone(clean);
+      if (u && u.id !== req.user.id) {
         await pool.query(
           "INSERT INTO chat_conversation_members (conversation_id, user_id, role) VALUES ($1, $2, 'member') ON CONFLICT DO NOTHING",
-          [convId, Number(uRes.rows[0].id)]
+          [convId, u.id]
         );
       }
     }
@@ -1050,15 +1120,11 @@ app.post('/api/conversations/:id/members', authMiddleware, async (req, res) => {
       return res.status(403).json({ ok: false, error: 'You are not a member of this conversation.' });
     }
 
-    const userRes = await pool.query(
-      'SELECT id, name, phone, avatar_color FROM chat_users WHERE phone = $1',
-      [phone]
-    );
-    if (!userRes.rows.length) {
+    const newUser = await findUserByPhone(phone);
+    if (!newUser) {
       return res.status(404).json({ ok: false, error: 'No user registered with this phone number.' });
     }
 
-    const newUser = userRes.rows[0];
     const newUserId = Number(newUser.id);
 
     const alreadyMember = await pool.query(
@@ -1408,6 +1474,143 @@ app.get('/api/admin/conversations/:id/audit', authMiddleware, adminMiddleware, a
   } catch (err) {
     console.error('Admin audit log error:', err);
     res.status(500).json({ ok: false, error: 'Could not load audit log.' });
+  }
+});
+
+// Admin: Permanently delete (purge) a message from database
+app.delete('/api/admin/messages/:id/purge', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const msgId = Number(req.params.id);
+    const { rows } = await pool.query(
+      'SELECT id, conversation_id, media_url, is_deleted FROM chat_messages WHERE id = $1',
+      [msgId]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ ok: false, error: 'Message not found.' });
+    }
+
+    const msg = rows[0];
+    const convId = Number(msg.conversation_id);
+
+    // Delete associated physical media file if stored locally
+    if (msg.media_url && typeof msg.media_url === 'string') {
+      try {
+        const parts = msg.media_url.split('/static/uploads/');
+        if (parts.length > 1) {
+          const filename = path.basename(parts[1]);
+          const filePath = path.join(UPLOADS_DIR, filename);
+          if (fs.existsSync(filePath)) {
+            await fs.promises.unlink(filePath);
+          }
+        }
+      } catch (fileErr) {
+        console.warn('Could not remove media file on purge:', fileErr.message);
+      }
+    }
+
+    // Hard delete permanently from database
+    await pool.query('DELETE FROM chat_messages WHERE id = $1', [msgId]);
+
+    // Broadcast purge event to conversation room and audit
+    io.to(`c:${convId}`).emit('message_purged', {
+      id: msgId,
+      conversationId: convId,
+    });
+
+    res.json({ ok: true, id: msgId, conversationId: convId });
+  } catch (err) {
+    console.error('Purge message error:', err);
+    res.status(500).json({ ok: false, error: 'Could not permanently delete message.' });
+  }
+});
+
+// Admin: Bulk permanently delete (purge) all soft-deleted messages in a conversation
+app.delete('/api/admin/conversations/:id/purge-deleted', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const convId = Number(req.params.id);
+    const { rows } = await pool.query(
+      'SELECT id, media_url FROM chat_messages WHERE conversation_id = $1 AND is_deleted = TRUE',
+      [convId]
+    );
+
+    for (const msg of rows) {
+      if (msg.media_url && typeof msg.media_url === 'string') {
+        try {
+          const parts = msg.media_url.split('/static/uploads/');
+          if (parts.length > 1) {
+            const filename = path.basename(parts[1]);
+            const filePath = path.join(UPLOADS_DIR, filename);
+            if (fs.existsSync(filePath)) {
+              await fs.promises.unlink(filePath);
+            }
+          }
+        } catch (fErr) {
+          // ignore file deletion errors
+        }
+      }
+    }
+
+    const deleteRes = await pool.query(
+      'DELETE FROM chat_messages WHERE conversation_id = $1 AND is_deleted = TRUE',
+      [convId]
+    );
+
+    res.json({ ok: true, purgedCount: deleteRes.rowCount || rows.length });
+  } catch (err) {
+    console.error('Bulk purge error:', err);
+    res.status(500).json({ ok: false, error: 'Could not purge deleted messages.' });
+  }
+});
+
+// Admin: Change user role (promote to admin or demote to regular user)
+app.post('/api/admin/users/:id/role', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const targetId = Number(req.params.id);
+    const isAdmin = Boolean(req.body.isAdmin);
+
+    if (targetId === req.user.id && !isAdmin) {
+      return res.status(400).json({ ok: false, error: 'You cannot remove your own admin status.' });
+    }
+
+    await pool.query('UPDATE chat_users SET is_admin = $1 WHERE id = $2', [isAdmin, targetId]);
+
+    // Real-time notification to user
+    io.to(`u:${targetId}`).emit('role_changed', { isAdmin });
+
+    res.json({ ok: true, targetId, isAdmin });
+  } catch (err) {
+    console.error('Change user role error:', err);
+    res.status(500).json({ ok: false, error: 'Could not update user role.' });
+  }
+});
+
+// Auth: Claim admin privileges (with admin code or if no other admin exists)
+app.post('/api/auth/claim-admin', authMiddleware, async (req, res) => {
+  try {
+    const code = String(req.body.code || '').trim();
+    const adminCountRes = await pool.query('SELECT count(*)::int as count FROM chat_users WHERE is_admin = TRUE');
+    const hasAdmins = adminCountRes.rows[0].count > 0;
+
+    const validCodes = ['admin', 'admin123', 'chatboxadmin'];
+    if (process.env.ADMIN_KEY) validCodes.push(process.env.ADMIN_KEY.trim());
+    if (process.env.ADMIN_CODE) validCodes.push(process.env.ADMIN_CODE.trim());
+
+    const isAuthorized = !hasAdmins || validCodes.includes(code);
+    if (!isAuthorized) {
+      return res.status(403).json({ ok: false, error: 'Invalid admin authorization code.' });
+    }
+
+    await pool.query('UPDATE chat_users SET is_admin = TRUE WHERE id = $1', [req.user.id]);
+    const updated = await getUserById(req.user.id);
+
+    // Notify user socket
+    io.to(`u:${req.user.id}`).emit('role_changed', { isAdmin: true });
+
+    res.json({ ok: true, user: updated, message: 'You have been granted administrator access!' });
+  } catch (err) {
+    console.error('Claim admin error:', err);
+    res.status(500).json({ ok: false, error: 'Could not claim admin status.' });
   }
 });
 

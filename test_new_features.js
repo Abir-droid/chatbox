@@ -360,6 +360,222 @@ async function run() {
   assert.equal(frankMsg.text, 'Hello Frank without refresh!');
   console.log('  ✔ Frank received live message in real time without refreshing or opening the chat!');
 
+  // 8. Bangladesh Phone Number Matching (+880 vs 01...)
+  console.log('\n[Test 8] Bangladesh Phone Number Normalization (+880 vs 01...)...');
+  const regKamal = await request('/api/auth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: { name: 'Kamal Hossain', phone: '+8801712345678', password: 'password123' },
+  });
+  assert.equal(regKamal.status, 200);
+  const tokenKamal = regKamal.json.token;
+  const userKamal = regKamal.json.user;
+
+  const regRahim = await request('/api/auth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: { name: 'Rahim Uddin', phone: '01812345678', password: 'password123' },
+  });
+  assert.equal(regRahim.status, 200);
+  const tokenRahim = regRahim.json.token;
+  const userRahim = regRahim.json.user;
+
+  // Duplicate registration rejection with alternate BD format
+  const dupReg = await request('/api/auth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: { name: 'Duplicate Kamal', phone: '01712345678', password: 'password123' },
+  });
+  assert.equal(dupReg.status, 400);
+  console.log('  ✔ Duplicate registration prevented across BD phone formats (+880 vs 01)');
+
+  // Self friend request blocked even when using alternate format
+  const selfReq = await request('/api/friends/request', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${tokenKamal}`, 'Content-Type': 'application/json' },
+    body: { phone: '01712345678' },
+  });
+  assert.equal(selfReq.status, 400);
+  console.log('  ✔ Self friend request blocked across alternate phone formats');
+
+  // Rahim sends friend request to Kamal using Kamal's regular local number 01712345678
+  const reqToKamal = await request('/api/friends/request', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${tokenRahim}`, 'Content-Type': 'application/json' },
+    body: { phone: '01712345678' },
+  });
+  assert.equal(reqToKamal.status, 200);
+  assert.equal(reqToKamal.json.ok, true);
+  console.log('  ✔ Rahim sent friend request to Kamal using regular number 01712345678 (registered +8801712345678)');
+
+  // Kamal lists friend requests and sees Rahim
+  const kamalRequests = await request('/api/friends/requests', {
+    headers: { Authorization: `Bearer ${tokenKamal}` },
+  });
+  assert.equal(kamalRequests.status, 200);
+  assert.equal(kamalRequests.json.requests.length, 1);
+  const reqIdKamal = kamalRequests.json.requests[0].id;
+
+  // Kamal accepts friend request
+  const acceptRes = await request(`/api/friends/requests/${reqIdKamal}/accept`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${tokenKamal}` },
+  });
+  assert.equal(acceptRes.status, 200);
+  console.log('  ✔ Kamal accepted friend request; both are now mutual friends');
+
+  // Kamal opens direct chat with Rahim using +8801812345678 (Rahim registered with 01812345678)
+  const directKamalRahim = await request('/api/conversations/direct', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${tokenKamal}`, 'Content-Type': 'application/json' },
+    body: { phone: '+8801812345678' },
+  });
+  assert.equal(directKamalRahim.status, 200);
+  const convIdKR = directKamalRahim.json.conversation.id;
+  console.log('  ✔ Direct chat created using international format (+8801812345678) for local user (01812345678)');
+
+  // Cross-format Login verification
+  const loginKamalLocal = await request('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: { phone: '01712345678', password: 'password123' },
+  });
+  assert.equal(loginKamalLocal.status, 200);
+  assert.equal(loginKamalLocal.json.user.id, userKamal.id);
+
+  const loginRahimIntl = await request('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: { phone: '+8801812345678', password: 'password123' },
+  });
+  assert.equal(loginRahimIntl.status, 200);
+  assert.equal(loginRahimIntl.json.user.id, userRahim.id);
+  console.log('  ✔ Seamless login verified using both +880 and 01 formats');
+
+  // 9. Admin Permanent Deletion (Purge) of Deleted Messages
+  console.log('\n[Test 9] Admin Permanent Deletion (Purge) of Soft-Deleted Messages...');
+
+  // Connect socket for Kamal to send a message
+  const socketKamal = Client(`http://127.0.0.1:${PORT}`, {
+    path: '/socket.io',
+    auth: { token: tokenKamal },
+  });
+  await new Promise((resolve) => socketKamal.on('connect', resolve));
+
+  let msgIdToPurge;
+  await new Promise((resolve) => {
+    socketKamal.emit(
+      'message',
+      { conversationId: convIdKR, text: 'Sensitive message to be permanently purged' },
+      (ack) => {
+        assert.equal(ack.ok, true);
+        msgIdToPurge = ack.id;
+        resolve();
+      }
+    );
+  });
+
+  // Kamal soft deletes the message
+  const softDelRes = await request(`/api/messages/${msgIdToPurge}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${tokenKamal}` },
+  });
+  assert.equal(softDelRes.status, 200);
+
+  // Soft-deleted message is hidden from regular chat history
+  const normalHistory = await request(`/api/conversations/${convIdKR}/messages`, {
+    headers: { Authorization: `Bearer ${tokenKamal}` },
+  });
+  assert.equal(normalHistory.status, 200);
+  assert.equal(normalHistory.json.messages.length, 0);
+
+  // Admin (Dave) audit log preserves and sees the deleted message
+  const auditBefore = await request(`/api/admin/conversations/${convIdKR}/audit`, {
+    headers: { Authorization: `Bearer ${tokenDave}` },
+  });
+  assert.equal(auditBefore.status, 200);
+  assert.equal(auditBefore.json.messages.length, 1);
+  assert.equal(auditBefore.json.messages[0].isDeleted, true);
+  console.log('  ✔ Soft-deleted message hidden from users but visible to Admin in audit log');
+
+  // Non-admin (Rahim) attempts to permanently purge message -> 403 Forbidden
+  const forbiddenPurge = await request(`/api/admin/messages/${msgIdToPurge}/purge`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${tokenRahim}` },
+  });
+  assert.equal(forbiddenPurge.status, 403);
+  console.log('  ✔ Non-admin users cannot permanently purge messages (403 Forbidden)');
+
+  // Admin (Dave) permanently purges the message from database
+  const purgeRes = await request(`/api/admin/messages/${msgIdToPurge}/purge`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${tokenDave}` },
+  });
+  assert.equal(purgeRes.status, 200);
+  assert.equal(purgeRes.json.ok, true);
+
+  // Verify message is completely gone from the database audit log as well
+  const auditAfter = await request(`/api/admin/conversations/${convIdKR}/audit`, {
+    headers: { Authorization: `Bearer ${tokenDave}` },
+  });
+  assert.equal(auditAfter.status, 200);
+  assert.equal(auditAfter.json.messages.length, 0);
+  console.log('  ✔ Admin permanently purged message: completely deleted from database and audit log');
+
+  // Test bulk purge of all deleted messages in conversation
+  await new Promise((resolve) => {
+    socketKamal.emit('message', { conversationId: convIdKR, text: 'Deleted 1' }, () => resolve());
+  });
+  await new Promise((resolve) => {
+    socketKamal.emit('message', { conversationId: convIdKR, text: 'Deleted 2' }, () => resolve());
+  });
+  const msgsRes = await request(`/api/conversations/${convIdKR}/messages`, {
+    headers: { Authorization: `Bearer ${tokenKamal}` },
+  });
+  for (const m of msgsRes.json.messages) {
+    await request(`/api/messages/${m.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${tokenKamal}` } });
+  }
+
+  const bulkPurgeRes = await request(`/api/admin/conversations/${convIdKR}/purge-deleted`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${tokenDave}` },
+  });
+  assert.equal(bulkPurgeRes.status, 200);
+  assert.equal(bulkPurgeRes.json.purgedCount, 2);
+  console.log('  ✔ Admin bulk purged all soft-deleted messages in conversation');
+
+  // 10. Admin Role Promotion & Claim Admin
+  console.log('\n[Test 10] Admin Role Management & Claim Admin...');
+  const promoteRes = await request(`/api/admin/users/${userKamal.id}/role`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${tokenDave}`, 'Content-Type': 'application/json' },
+    body: { isAdmin: true },
+  });
+  assert.equal(promoteRes.status, 200);
+  assert.equal(promoteRes.json.isAdmin, true);
+
+  const meKamal = await request('/api/auth/me', {
+    headers: { Authorization: `Bearer ${tokenKamal}` },
+  });
+  assert.equal(meKamal.json.user.is_admin, true);
+  console.log('  ✔ Admin promoted Kamal to Administrator successfully');
+
+  // Claim admin via code for Rahim
+  const claimRes = await request('/api/auth/claim-admin', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${tokenRahim}`, 'Content-Type': 'application/json' },
+    body: { code: 'admin123' },
+  });
+  assert.equal(claimRes.status, 200);
+  assert.equal(claimRes.json.ok, true);
+
+  const meRahim = await request('/api/auth/me', {
+    headers: { Authorization: `Bearer ${tokenRahim}` },
+  });
+  assert.equal(meRahim.json.user.is_admin, true);
+  console.log('  ✔ Rahim claimed admin privileges via admin code');
+
+  socketKamal.disconnect();
   socketFrank.disconnect();
   socketDave.disconnect();
   socketEmma.disconnect();

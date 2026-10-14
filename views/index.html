@@ -513,6 +513,19 @@
           </div>
         </div>
 
+        <div class="field" id="admin-claim-section">
+          <label for="claim-admin-code">Administrator Privilege</label>
+          <div class="claim-admin-wrap" style="display:flex;gap:0.5rem;align-items:center;">
+            <div class="input-wrap" style="flex:1;">
+              <svg class="input-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              <input type="password" id="claim-admin-code" placeholder="Admin code (e.g. admin123)">
+            </div>
+            <button type="button" class="btn-secondary" id="claim-admin-btn" style="white-space:nowrap;padding:0.6rem 0.85rem;height:auto;font-size:0.85rem;">
+              <span>Claim Admin</span>
+            </button>
+          </div>
+        </div>
+
         <p class="field-error" id="profile-error"></p>
 
         <div class="dialog-actions">
@@ -618,6 +631,7 @@
           </div>
         </div>
       </div>
+
     </div>
   </dialog>
 

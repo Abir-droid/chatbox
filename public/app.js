@@ -570,6 +570,19 @@
       logout();
     });
 
+    socket.on('role_changed', ({ isAdmin }) => {
+      if (state.user) {
+        state.user.is_admin = isAdmin;
+        el.navAdmin.hidden = !isAdmin;
+        toast(isAdmin ? 'You have been granted Administrator rights!' : 'Your admin rights have been revoked.');
+      }
+    });
+
+    socket.on('message_purged', ({ id }) => {
+      const msgEl = document.querySelector(`.msg-row[data-msg-id="${id}"]`);
+      if (msgEl) msgEl.remove();
+    });
+
     socket.on('user_status', ({ userId, isOnline }) => {
       // Update online status in friends & conversations
       for (const conv of state.conversations) {
@@ -2005,7 +2018,39 @@
         tdMsgs.textContent = u.messageCount;
 
         const tdRole = document.createElement('td');
-        tdRole.textContent = u.isAdmin ? 'Admin' : 'User';
+        const roleWrap = document.createElement('div');
+        roleWrap.style.display = 'flex';
+        roleWrap.style.alignItems = 'center';
+        roleWrap.style.gap = '6px';
+
+        const roleBadge = document.createElement('span');
+        roleBadge.className = `role-badge ${u.isAdmin ? 'role-admin' : 'role-user'}`;
+        roleBadge.textContent = u.isAdmin ? 'Admin' : 'User';
+        roleWrap.appendChild(roleBadge);
+
+        if (u.id !== state.user.id) {
+          const roleBtn = document.createElement('button');
+          roleBtn.type = 'button';
+          roleBtn.className = `btn-role-toggle ${u.isAdmin ? 'demote' : 'promote'}`;
+          roleBtn.textContent = u.isAdmin ? 'Demote' : 'Make Admin';
+          roleBtn.title = u.isAdmin ? 'Demote to regular user' : 'Promote to administrator';
+          roleBtn.onclick = async () => {
+            try {
+              await api(`/api/admin/users/${u.id}/role`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ isAdmin: !u.isAdmin }),
+              });
+              toast(`User ${!u.isAdmin ? 'promoted to Admin' : 'demoted to User'}`);
+              loadAdminUsers();
+              loadAdminStats();
+            } catch (err) {
+              toast(err.message);
+            }
+          };
+          roleWrap.appendChild(roleBtn);
+        }
+        tdRole.appendChild(roleWrap);
 
         const tdStatus = document.createElement('td');
         tdStatus.innerHTML = `<span class="status-badge ${u.isSuspended ? 'suspended' : 'active'}">${
@@ -2065,7 +2110,39 @@
 
   async function loadConversationAuditLog(conv) {
     document.querySelectorAll('.audit-conv-item').forEach((i) => i.classList.remove('active'));
-    el.auditThreadHeader.textContent = `Auditing: ${conv.name} (${conv.totalMessages} total, ${conv.deletedMessages} deleted by users)`;
+
+    function renderAuditHeader() {
+      el.auditThreadHeader.replaceChildren();
+      const titleSpan = document.createElement('span');
+      titleSpan.textContent = `Auditing: ${conv.name} (${conv.totalMessages} total, ${conv.deletedMessages} deleted by users)`;
+      el.auditThreadHeader.appendChild(titleSpan);
+
+      if (conv.deletedMessages > 0) {
+        const purgeAllBtn = document.createElement('button');
+        purgeAllBtn.type = 'button';
+        purgeAllBtn.className = 'audit-purge-all-btn';
+        purgeAllBtn.innerHTML = '<svg viewBox="0 0 24 24" class="btn-icon" aria-hidden="true" style="width:13px;height:13px;display:inline-block;vertical-align:-2px;margin-right:4px"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>Purge All Deleted';
+        purgeAllBtn.onclick = async () => {
+          if (!confirm(`Permanently delete all ${conv.deletedMessages} deleted messages in "${conv.name}"? This cannot be undone.`)) {
+            return;
+          }
+          try {
+            const res = await api(`/api/admin/conversations/${conv.id}/purge-deleted`, { method: 'DELETE' });
+            toast(`Purged ${res.purgedCount || conv.deletedMessages} deleted messages.`);
+            conv.totalMessages = Math.max(0, conv.totalMessages - (res.purgedCount || conv.deletedMessages));
+            conv.deletedMessages = 0;
+            loadConversationAuditLog(conv);
+            loadAdminStats();
+            loadAdminConversations();
+          } catch (err) {
+            toast(err.message);
+          }
+        };
+        el.auditThreadHeader.appendChild(purgeAllBtn);
+      }
+    }
+
+    renderAuditHeader();
 
     try {
       const data = await api(`/api/admin/conversations/${conv.id}/audit`);
@@ -2079,12 +2156,43 @@
         header.style.fontSize = '0.78rem';
         header.style.color = 'var(--muted)';
         header.style.marginBottom = '4px';
+        header.style.display = 'flex';
+        header.style.alignItems = 'center';
+        header.style.flexWrap = 'wrap';
+        header.style.gap = '6px';
         header.innerHTML = `<strong>${m.senderName}</strong> (${m.senderPhone || 'ID:' + m.senderId}) • ${new Date(
           m.ts
         ).toLocaleString()}`;
 
         if (m.isDeleted) {
-          header.innerHTML += ' <span class="audit-deleted-badge">DELETED BY USER</span>';
+          const badge = document.createElement('span');
+          badge.className = 'audit-deleted-badge';
+          badge.textContent = 'DELETED BY USER';
+          header.appendChild(badge);
+
+          const purgeBtn = document.createElement('button');
+          purgeBtn.type = 'button';
+          purgeBtn.className = 'audit-purge-btn';
+          purgeBtn.title = 'Permanently delete this message from the database';
+          purgeBtn.innerHTML = '<svg viewBox="0 0 24 24" class="btn-icon" aria-hidden="true" style="width:12px;height:12px;display:inline-block;vertical-align:-1px;margin-right:3px"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>Permanently Delete';
+          purgeBtn.onclick = async (e) => {
+            e.stopPropagation();
+            if (!confirm('Are you sure you want to PERMANENTLY delete this message from the database? This cannot be undone.')) {
+              return;
+            }
+            try {
+              await api(`/api/admin/messages/${m.id}/purge`, { method: 'DELETE' });
+              toast('Message permanently purged from database.');
+              li.remove();
+              conv.deletedMessages = Math.max(0, (conv.deletedMessages || 1) - 1);
+              conv.totalMessages = Math.max(0, (conv.totalMessages || 1) - 1);
+              renderAuditHeader();
+              loadAdminStats();
+            } catch (err) {
+              toast(err.message);
+            }
+          };
+          header.appendChild(purgeBtn);
         }
 
         const body = document.createElement('div');
@@ -2187,6 +2295,27 @@
       renderConversations();
       renderFriends();
     });
+  }
+
+  const claimAdminBtn = $('claim-admin-btn');
+  if (claimAdminBtn) {
+    claimAdminBtn.onclick = async () => {
+      try {
+        const input = $('claim-admin-code');
+        const code = input ? input.value.trim() : '';
+        const res = await api('/api/auth/claim-admin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code }),
+        });
+        if (state.user) state.user.is_admin = true;
+        el.navAdmin.hidden = false;
+        toast(res.message || 'You are now an administrator!');
+        if (input) input.value = '';
+      } catch (err) {
+        toast(err.message);
+      }
+    };
   }
 
   /* ------------------------------------------------------------- init */
