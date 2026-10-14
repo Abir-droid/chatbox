@@ -120,21 +120,39 @@ async function initDatabase() {
 
         CREATE TABLE IF NOT EXISTS chat_messages (
           id              BIGSERIAL PRIMARY KEY,
-          conversation_id BIGINT NOT NULL REFERENCES chat_conversations (id) ON DELETE CASCADE,
-          sender_id       BIGINT NOT NULL REFERENCES chat_users (id) ON DELETE CASCADE,
-          sender_name     TEXT NOT NULL,
+          conversation_id BIGINT REFERENCES chat_conversations (id) ON DELETE CASCADE,
+          sender_id       BIGINT REFERENCES chat_users (id) ON DELETE CASCADE,
+          sender_name     TEXT,
           body            TEXT NOT NULL DEFAULT '',
           media_url       TEXT,
-          media_type      TEXT, -- 'image' or 'video'
+          media_type      TEXT,
           media_name      TEXT,
           is_deleted      BOOLEAN NOT NULL DEFAULT FALSE,
           created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
         );
 
+        -- Safe column migrations if chat_messages existed from previous schema
+        ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS conversation_id BIGINT;
+        ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS sender_id BIGINT;
+        ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS sender_name TEXT;
+        ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_url TEXT;
+        ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_type TEXT;
+        ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_name TEXT;
+        ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE;
+
         CREATE INDEX IF NOT EXISTS idx_chat_messages_conv_id ON chat_messages (conversation_id, id DESC);
         CREATE INDEX IF NOT EXISTS idx_chat_conv_members_user ON chat_conversation_members (user_id);
         CREATE INDEX IF NOT EXISTS idx_chat_friends_user ON chat_friends (user_id);
       `);
+
+      try {
+        await pool.query(`
+          ALTER TABLE chat_messages ALTER COLUMN room DROP NOT NULL;
+          ALTER TABLE chat_messages ALTER COLUMN username DROP NOT NULL;
+        `);
+      } catch (err) {
+        // Columns room/username may not exist in fresh installs
+      }
       break;
     } catch (err) {
       if (attempt >= 15) throw err;
