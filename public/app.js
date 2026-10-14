@@ -219,6 +219,7 @@
     el.tabLogin.classList.toggle('active', !register);
     el.tabRegister.classList.toggle('active', register);
     el.nameField.hidden = !register;
+    el.authName.required = register;
     el.authSubmit.textContent = register ? 'Create Account' : 'Sign In';
     el.authError.hidden = true;
     if (register) el.authName.focus();
@@ -233,6 +234,9 @@
     const password = el.authPassword.value;
     const name = el.authName.value.trim();
 
+    el.authSubmit.disabled = true;
+    el.authSubmit.textContent = isRegisterMode ? 'Creating account…' : 'Signing in…';
+
     try {
       let data;
       if (isRegisterMode) {
@@ -241,22 +245,28 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name, phone, password }),
         });
+        toast('Account created successfully!');
       } else {
         data = await api('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ phone, password }),
         });
+        toast(`Welcome back, ${data.user.name}!`);
       }
 
       state.token = data.token;
       state.user = data.user;
       localStorage.setItem('chatbox_token', data.token);
 
+      el.authPassword.value = '';
       onLoginSuccess();
     } catch (err) {
       el.authError.textContent = err.message;
       el.authError.hidden = false;
+    } finally {
+      el.authSubmit.disabled = false;
+      el.authSubmit.textContent = isRegisterMode ? 'Create Account' : 'Sign In';
     }
   }
 
@@ -273,6 +283,7 @@
   async function checkInitialAuth() {
     if (!state.token) {
       el.authScreen.hidden = false;
+      el.app.hidden = true;
       return;
     }
     try {
