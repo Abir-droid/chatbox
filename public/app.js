@@ -8,6 +8,8 @@
   const $ = (id) => document.getElementById(id);
 
   const el = {
+    appLoader: $('app-loader'),
+    loaderStatus: $('loader-status'),
     authScreen: $('auth-screen'),
     authForm: $('auth-form'),
     tabLogin: $('tab-login'),
@@ -16,6 +18,9 @@
     authName: $('auth-name'),
     authPhone: $('auth-phone'),
     authPassword: $('auth-password'),
+    togglePwBtn: $('toggle-pw-btn'),
+    pwEye: $('pw-eye'),
+    pwEyeOff: $('pw-eye-off'),
     authError: $('auth-error'),
     authSubmit: $('auth-submit'),
 
@@ -23,6 +28,7 @@
     rail: $('rail'),
     scrim: $('scrim'),
     menuBtn: $('menu-btn'),
+    railSearchInput: $('rail-search-input'),
 
     navChats: $('nav-chats'),
     navFriends: $('nav-friends'),
@@ -128,6 +134,19 @@
   };
 
   let socket = null;
+
+  /* ------------------------------------------------------------- app loader */
+  function setLoaderStatus(text) {
+    if (el.loaderStatus) el.loaderStatus.textContent = text;
+  }
+
+  function hideLoader() {
+    if (!el.appLoader) return;
+    el.appLoader.classList.add('fade-out');
+    setTimeout(() => {
+      el.appLoader.hidden = true;
+    }, 400);
+  }
 
   /* ----------------------------------------------------------------- sound */
   function playChime() {
@@ -284,14 +303,18 @@
     if (!state.token) {
       el.authScreen.hidden = false;
       el.app.hidden = true;
+      hideLoader();
       return;
     }
     try {
+      setLoaderStatus('Verifying session…');
       const data = await api('/api/auth/me');
       state.user = data.user;
       onLoginSuccess();
     } catch (err) {
       logout();
+    } finally {
+      hideLoader();
     }
   }
 
@@ -309,6 +332,7 @@
     initSocket();
     loadConversations();
     loadFriends();
+    hideLoader();
   }
 
   /* ------------------------------------------------------------- socket */
@@ -420,14 +444,25 @@
     });
   }
 
+  let searchTerm = '';
+
   function renderTyping() {
     const names = [...state.typers.values()];
     if (!names.length) {
-      el.typing.textContent = '';
+      el.typing.replaceChildren();
       return;
     }
-    if (names.length === 1) el.typing.textContent = `${names[0]} is typing…`;
-    else el.typing.textContent = 'Multiple people are typing…';
+    const labelText = names.length === 1 ? `${names[0]} is typing…` : 'Multiple people are typing…';
+    el.typing.innerHTML = `
+      <div class="typing-bubble">
+        <div class="typing-dots" aria-hidden="true">
+          <span class="typing-dot"></span>
+          <span class="typing-dot"></span>
+          <span class="typing-dot"></span>
+        </div>
+        <span class="typing-label">${labelText}</span>
+      </div>
+    `;
   }
 
   /* ------------------------------------------------------- conversations & chats */
@@ -443,16 +478,26 @@
 
   function renderConversations() {
     el.chatList.replaceChildren();
-    if (!state.conversations.length) {
+    const list = searchTerm
+      ? state.conversations.filter(
+          (c) =>
+            (c.name && c.name.toLowerCase().includes(searchTerm)) ||
+            (c.phone && c.phone.includes(searchTerm)) ||
+            (c.lastMessage && c.lastMessage.text && c.lastMessage.text.toLowerCase().includes(searchTerm))
+        )
+      : state.conversations;
+
+    if (!list.length) {
       const empty = document.createElement('li');
       empty.className = 'panel-title';
-      empty.style.padding = '1rem 0.5rem';
-      empty.textContent = 'No chats yet. Click + above!';
+      empty.style.padding = '1.25rem 0.75rem';
+      empty.style.textAlign = 'center';
+      empty.textContent = searchTerm ? 'No matching conversations' : 'No chats yet. Click + above!';
       el.chatList.appendChild(empty);
       return;
     }
 
-    for (const conv of state.conversations) {
+    for (const conv of list) {
       const li = document.createElement('li');
       li.className = `chat-item ${state.activeConversationId === conv.id ? 'active' : ''}`;
       li.onclick = () => switchConversation(conv.id);
@@ -583,7 +628,19 @@
 
     const meta = document.createElement('div');
     meta.className = 'msg-meta';
-    meta.textContent = `${isOwn ? 'You' : msg.senderName} • ${formatShortTime(msg.ts)}`;
+    
+    const timeSpan = document.createElement('span');
+    timeSpan.textContent = `${isOwn ? 'You' : msg.senderName} • ${formatShortTime(msg.ts)}`;
+    meta.appendChild(timeSpan);
+
+    if (isOwn) {
+      const checkSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      checkSvg.setAttribute('class', 'msg-check');
+      checkSvg.setAttribute('viewBox', '0 0 16 16');
+      checkSvg.setAttribute('aria-hidden', 'true');
+      checkSvg.innerHTML = '<path d="M12.3 4.3a1 1 0 0 0-1.4 0L6 9.2 4.1 7.3a1 1 0 1 0-1.4 1.4l2.6 2.6a1 1 0 0 0 1.4 0l5.6-5.6a1 1 0 0 0 0-1.4z"/>';
+      meta.appendChild(checkSvg);
+    }
 
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
@@ -619,16 +676,38 @@
 
     bodyDiv.append(meta, bubble);
 
-    // Soft delete action button
-    if (isOwn || state.user.is_admin) {
-      const actions = document.createElement('div');
-      actions.className = 'msg-actions';
+    // Actions toolbar (Copy & Delete)
+    const actions = document.createElement('div');
+    actions.className = 'msg-actions';
+
+    if (msg.text) {
+      const copyBtn = document.createElement('button');
+      copyBtn.type = 'button';
+      copyBtn.className = 'action-btn';
+      copyBtn.title = 'Copy message';
+      copyBtn.innerHTML = '<svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+      copyBtn.onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(msg.text);
+          toast('Copied message to clipboard');
+        } catch {
+          toast('Failed to copy');
+        }
+      };
+      actions.appendChild(copyBtn);
+    }
+
+    if (isOwn || (state.user && state.user.is_admin)) {
       const delBtn = document.createElement('button');
-      delBtn.className = 'action-btn';
+      delBtn.type = 'button';
+      delBtn.className = 'action-btn del-btn';
       delBtn.title = 'Delete message';
       delBtn.innerHTML = '<svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
       delBtn.onclick = () => deleteMessage(msg.id);
       actions.appendChild(delBtn);
+    }
+
+    if (actions.children.length > 0) {
       li.appendChild(actions);
     }
 
@@ -807,16 +886,25 @@
 
   function renderFriends() {
     el.friendList.replaceChildren();
-    if (!state.friends.length) {
+    const list = searchTerm
+      ? state.friends.filter(
+          (f) =>
+            (f.name && f.name.toLowerCase().includes(searchTerm)) ||
+            (f.phone && f.phone.includes(searchTerm))
+        )
+      : state.friends;
+
+    if (!list.length) {
       const empty = document.createElement('li');
       empty.className = 'panel-title';
-      empty.style.padding = '1rem 0.5rem';
-      empty.textContent = 'No friends added yet. Click + Add!';
+      empty.style.padding = '1.25rem 0.75rem';
+      empty.style.textAlign = 'center';
+      empty.textContent = searchTerm ? 'No matching friends' : 'No friends added yet. Click + Add!';
       el.friendList.appendChild(empty);
       return;
     }
 
-    for (const f of state.friends) {
+    for (const f of list) {
       const li = document.createElement('li');
       li.className = 'friend-item';
       li.onclick = () => startDirectChatWithPhone(f.phone);
@@ -1229,6 +1317,23 @@
   el.tabLogin.onclick = () => setAuthMode(false);
   el.tabRegister.onclick = () => setAuthMode(true);
   el.authForm.onsubmit = handleAuthSubmit;
+
+  if (el.togglePwBtn && el.authPassword) {
+    el.togglePwBtn.onclick = () => {
+      const isPw = el.authPassword.type === 'password';
+      el.authPassword.type = isPw ? 'text' : 'password';
+      if (el.pwEye) el.pwEye.hidden = isPw;
+      if (el.pwEyeOff) el.pwEyeOff.hidden = !isPw;
+    };
+  }
+
+  if (el.railSearchInput) {
+    el.railSearchInput.addEventListener('input', (e) => {
+      searchTerm = e.target.value.toLowerCase().trim();
+      renderConversations();
+      renderFriends();
+    });
+  }
 
   /* ------------------------------------------------------------- init */
   paintTheme();
