@@ -575,6 +575,52 @@ async function run() {
   assert.equal(meRahim.json.user.is_admin, true);
   console.log('  ✔ Rahim claimed admin privileges via admin code');
 
+  // 11. Unfriend Feature & Direct Chat Blocking
+  console.log('\n[Test 11] Unfriend Feature & Mutual Friendship Removal...');
+  // Kamal unfriends Rahim
+  const unfriendRes = await request(`/api/friends/${userRahim.id}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${tokenKamal}` },
+  });
+  assert.equal(unfriendRes.status, 200);
+  assert.equal(unfriendRes.json.ok, true);
+  console.log('  ✔ Kamal called DELETE /api/friends/:id successfully');
+
+  // Verify Kamal's friends list does not contain Rahim
+  const kamalFriends = await request('/api/friends', {
+    headers: { Authorization: `Bearer ${tokenKamal}` },
+  });
+  assert.equal(kamalFriends.status, 200);
+  assert.ok(!kamalFriends.json.friends.some((f) => f.id === userRahim.id));
+
+  // Verify Rahim's friends list does not contain Kamal
+  const rahimFriends = await request('/api/friends', {
+    headers: { Authorization: `Bearer ${tokenRahim}` },
+  });
+  assert.equal(rahimFriends.status, 200);
+  assert.ok(!rahimFriends.json.friends.some((f) => f.id === userKamal.id));
+  console.log('  ✔ Mutual friendship removed from both users lists');
+
+  // Verify direct chat initiation is now blocked between non-friends
+  const blockedDm = await request('/api/conversations/direct', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${tokenKamal}`, 'Content-Type': 'application/json' },
+    body: { phone: userRahim.phone },
+  });
+  assert.equal(blockedDm.status, 403);
+  assert.equal(blockedDm.json.requiresFriendRequest, true);
+  console.log('  ✔ Direct chat correctly blocked (403) after unfriending');
+
+  // Verify friend request can be sent again after unfriend
+  const reReq = await request('/api/friends/request', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${tokenKamal}`, 'Content-Type': 'application/json' },
+    body: { phone: userRahim.phone },
+  });
+  assert.equal(reReq.status, 200);
+  assert.equal(reReq.json.ok, true);
+  console.log('  ✔ Friend request can be sent again after unfriending');
+
   socketKamal.disconnect();
   socketFrank.disconnect();
   socketDave.disconnect();

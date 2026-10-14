@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="auto">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -234,10 +234,17 @@
             <svg viewBox="0 0 24 24" class="btn-icon" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
             <span>Members</span>
           </button>
-          <button type="button" class="btn-secondary danger" id="delete-conv-btn" hidden title="Delete conversation for you" aria-label="Delete conversation">
-            <svg viewBox="0 0 24 24" class="btn-icon" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-            <span>Delete</span>
-          </button>
+          <div class="conv-more-wrap" id="conv-more-wrap" hidden>
+            <button type="button" class="icon-btn conv-more-btn" id="conv-more-btn" title="Chat options" aria-label="Chat options">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/><circle cx="5" cy="12" r="1.5"/></svg>
+            </button>
+            <div class="conv-dropdown" id="conv-dropdown" hidden>
+              <button type="button" class="conv-dropdown-item danger" id="delete-conv-btn" title="Delete conversation for you">
+                <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                <span>Delete Chat</span>
+              </button>
+            </div>
+          </div>
         </div>
       </header>
 

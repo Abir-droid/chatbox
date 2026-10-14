@@ -683,6 +683,43 @@ app.post('/api/friends/add', authMiddleware, async (req, res) => {
   }
 });
 
+// Friends: Unfriend / Remove Friend
+app.delete(['/api/friends/:id', '/api/friends/:id/unfriend'], authMiddleware, async (req, res) => {
+  try {
+    const friendId = Number(req.params.id);
+    if (!friendId) {
+      return res.status(400).json({ ok: false, error: 'Valid friend ID required.' });
+    }
+
+    if (friendId === req.user.id) {
+      return res.status(400).json({ ok: false, error: 'Cannot unfriend yourself.' });
+    }
+
+    // Delete mutual friendship
+    await pool.query(
+      'DELETE FROM chat_friends WHERE (user_id = $1 AND friend_id = $2) OR (user_id = $2 AND friend_id = $1)',
+      [req.user.id, friendId]
+    );
+
+    // Delete existing friend requests between them so clean slate
+    await pool.query(
+      'DELETE FROM chat_friend_requests WHERE (sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1)',
+      [req.user.id, friendId]
+    );
+
+    // Broadcast friend removal in real-time to both users
+    io.to(`u:${req.user.id}`).to(`u:${friendId}`).emit('friend_removed', {
+      userId: req.user.id,
+      friendId,
+    });
+
+    res.json({ ok: true, friendId, message: 'Unfriended successfully.' });
+  } catch (err) {
+    console.error('Unfriend failed:', err);
+    res.status(500).json({ ok: false, error: 'Could not remove friend.' });
+  }
+});
+
 // Friend Requests: Send request
 app.post('/api/friends/request', authMiddleware, async (req, res) => {
   try {

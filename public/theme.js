@@ -4,6 +4,10 @@
     var saved = localStorage.getItem('chatbox.theme');
     if (saved === 'light' || saved === 'dark') {
       document.documentElement.setAttribute('data-theme', saved);
+    } else {
+      document.documentElement.setAttribute('data-theme', 'dark');
     }
-  } catch (e) { /* storage blocked: follow the system theme */ }
+  } catch (e) {
+    document.documentElement.setAttribute('data-theme', 'dark');
+  }
 })();

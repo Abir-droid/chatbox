@@ -1188,6 +1188,8 @@ button:active {
 
 .msg-row {
   display: flex;
+  align-self: flex-start;
+  width: fit-content;
   gap: 0.7rem;
   max-width: 76%;
   position: relative;
@@ -1261,13 +1263,79 @@ button:active {
   transform: translateY(-1px);
 }
 
-/* Media in Chat Bubbles - borderless & sleek */
+/* Media in Chat Bubbles - clean, borderless, seamless */
+.bubble.has-media-only {
+  padding: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.bubble.has-media-only .msg-media {
+  margin: 0 !important;
+  border: none !important;
+  background: transparent !important;
+}
+
+.bubble.has-media-only .msg-media img,
+.bubble.has-media-only .msg-media video {
+  border: none !important;
+  outline: none !important;
+  border-radius: 14px !important;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.2) !important;
+  display: block;
+}
+
+.bubble.has-media {
+  padding: 4px !important;
+  border: none !important;
+}
+
+.bubble.has-media .msg-media {
+  margin: 0 !important;
+  border: none !important;
+}
+
+.bubble.has-media .msg-media img,
+.bubble.has-media .msg-media video {
+  border: none !important;
+  outline: none !important;
+  border-radius: 12px 12px 4px 4px !important;
+}
+
+.bubble.has-media p {
+  padding: 0.45rem 0.65rem 0.35rem !important;
+  margin: 0 !important;
+}
+
+/* Audio Voice Message Bubbles - clean, borderless, no weird thick colored frame */
+.bubble.has-audio {
+  padding: 0.25rem 0.5rem !important;
+  background: var(--surface-2) !important;
+  color: var(--ink) !important;
+  border: 1px solid var(--line) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+.msg-row.own .bubble.has-audio {
+  background: var(--surface-2) !important;
+  color: var(--ink) !important;
+  border: 1px solid var(--line) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+.bubble.has-audio .voice-bubble-header {
+  color: var(--ink-secondary) !important;
+}
+
 .msg-media {
   margin-top: 0.35rem;
-  border-radius: 10px;
+  border-radius: 12px;
   overflow: hidden;
   max-width: 400px;
   border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
 }
 
 .msg-media img {
@@ -1277,43 +1345,25 @@ button:active {
   object-fit: cover;
   display: block;
   cursor: zoom-in;
-  border-radius: 10px;
+  border-radius: 12px;
   border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
   transition: transform 0.2s ease;
 }
 
 .msg-media img:hover {
-  transform: scale(1.02);
+  transform: scale(1.015);
 }
 
 .msg-media video {
   width: 100%;
   max-height: 340px;
-  border-radius: 10px;
+  border-radius: 12px;
   background: #000;
   border: none !important;
-  display: block;
-}
-
-/* Subtle, ultra-thin border for media and voice note bubbles */
-.bubble:has(.msg-media),
-.bubble:has(.msg-audio),
-.bubble.has-media {
-  border: 0.5px solid rgba(0, 0, 0, 0.04);
-}
-
-[data-theme="dark"] .bubble:has(.msg-media),
-[data-theme="dark"] .bubble:has(.msg-audio),
-[data-theme="dark"] .bubble.has-media {
-  border: 0.5px solid rgba(255, 255, 255, 0.04);
-}
-
-.msg-row.own .bubble:has(.msg-media),
-.msg-row.own .bubble:has(.msg-audio),
-.msg-row.own .bubble.has-media {
-  border: none !important;
-}
-  background: #000;
+  outline: none !important;
+  box-shadow: none !important;
   display: block;
 }
 
@@ -1327,54 +1377,294 @@ button:active {
   box-shadow: none !important;
 }
 
-/* Message Actions Floating Toolbar */
-.msg-actions {
-  display: none;
+/* Message Down-Arrow and Action Menu */
+.msg-menu-wrap {
   position: absolute;
-  top: -12px;
-  right: -8px;
+  top: 6px;
+  right: -32px;
+  z-index: 25;
+}
+
+.msg-row.own .msg-menu-wrap {
+  right: auto;
+  left: -32px;
+}
+
+.msg-down-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 999px;
-  box-shadow: var(--shadow);
-  padding: 2px 4px;
-  gap: 2px;
-  z-index: 10;
-  animation: fadeIn 0.15s ease;
-}
-
-.msg-row.own .msg-actions {
-  right: auto;
-  left: -8px;
-}
-
-.msg-row:hover .msg-actions {
-  display: flex;
-}
-
-.action-btn {
-  padding: 5px;
   color: var(--muted);
-  font-size: 0.75rem;
-  border-radius: 50%;
+  box-shadow: var(--shadow-sm);
   display: flex;
   align-items: center;
   justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease, transform 0.15s ease;
 }
 
-.action-btn:hover {
+.msg-down-btn svg {
+  width: 13px;
+  height: 13px;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  fill: none;
+  transition: transform 0.15s ease;
+}
+
+.msg-row:hover .msg-down-btn,
+.msg-row.show-menu .msg-down-btn,
+.msg-down-btn.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.msg-down-btn:hover {
   color: var(--ink);
+  background: var(--surface-2);
+  transform: scale(1.05);
+}
+
+.msg-dropdown {
+  position: absolute;
+  top: 28px;
+  right: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 145px;
+  z-index: 100;
+  animation: scaleIn 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+  backdrop-filter: blur(12px);
+}
+
+.msg-row.own .msg-dropdown {
+  right: auto;
+  left: 0;
+}
+
+.msg-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.msg-dropdown-item:hover {
+  background: var(--surface-2);
+  color: var(--accent);
+}
+
+.msg-dropdown-item svg {
+  width: 15px;
+  height: 15px;
+  stroke: currentColor;
+  stroke-width: 2;
+  fill: none;
+  flex-shrink: 0;
+}
+
+.msg-dropdown-item.danger {
+  color: var(--danger);
+}
+
+.msg-dropdown-item.danger:hover {
+  background: var(--danger-soft);
+  color: var(--danger-hover);
+}
+
+/* Conversation Header Actions Dropdown */
+.conv-more-wrap {
+  position: relative;
+}
+
+.conv-more-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: var(--ink-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.conv-more-btn:hover {
+  background: var(--surface-3);
+  color: var(--ink);
+}
+
+.conv-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 160px;
+  z-index: 100;
+  animation: scaleIn 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+  backdrop-filter: blur(12px);
+}
+
+.conv-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 0.84rem;
+  font-weight: 500;
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.12s ease;
+}
+
+.conv-dropdown-item:hover {
   background: var(--surface-2);
 }
 
-.action-btn.del-btn:hover {
+.conv-dropdown-item.danger {
   color: var(--danger);
-  background: var(--danger-soft);
 }
 
-.action-btn svg {
-  width: 14px;
-  height: 14px;
+.conv-dropdown-item.danger:hover {
+  background: var(--danger-soft);
+  color: var(--danger-hover);
+}
+
+.conv-dropdown-item svg {
+  width: 15px;
+  height: 15px;
+  stroke: currentColor;
+  stroke-width: 2;
+  fill: none;
+  flex-shrink: 0;
+}
+
+/* Sidebar Chat Item Dropdown Trigger */
+.chat-item {
+  position: relative;
+}
+
+.chat-item-down-btn {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--rail-surface);
+  border: 1px solid var(--rail-line);
+  color: var(--rail-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+  z-index: 5;
+}
+
+.chat-item:hover .chat-item-down-btn,
+.chat-item-down-btn.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.chat-item-down-btn:hover {
+  color: #fff;
+  background: var(--rail-hover);
+}
+
+.chat-item-down-btn svg {
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  fill: none;
+}
+
+.chat-item-dropdown {
+  position: absolute;
+  top: calc(100% - 10px);
+  right: 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  padding: 5px;
+  min-width: 155px;
+  z-index: 60;
+  animation: scaleIn 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Unfriend Button */
+.friend-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.btn-unfriend {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  border-radius: 8px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  cursor: pointer;
+  margin-left: auto;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.btn-unfriend:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+}
+
+.btn-unfriend svg {
+  width: 13px;
+  height: 13px;
   stroke: currentColor;
   stroke-width: 2;
   fill: none;

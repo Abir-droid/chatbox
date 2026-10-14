@@ -61,6 +61,9 @@
     convTitle: $('conv-title'),
     convSub: $('conv-sub'),
     manageGroupBtn: $('manage-group-btn'),
+    convMoreWrap: $('conv-more-wrap'),
+    convMoreBtn: $('conv-more-btn'),
+    convDropdown: $('conv-dropdown'),
     deleteConvBtn: $('delete-conv-btn'),
 
     banner: $('banner'),
@@ -583,6 +586,11 @@
       if (msgEl) msgEl.remove();
     });
 
+    socket.on('friend_removed', ({ userId, friendId }) => {
+      state.friends = state.friends.filter((f) => f.id !== friendId && f.id !== userId);
+      renderFriends();
+    });
+
     socket.on('user_status', ({ userId, isOnline }) => {
       // Update online status in friends & conversations
       for (const conv of state.conversations) {
@@ -772,6 +780,15 @@
     }
   }
 
+  function closeAllDropdowns() {
+    document.querySelectorAll('.msg-dropdown:not([hidden])').forEach((d) => (d.hidden = true));
+    document.querySelectorAll('.msg-down-btn.active').forEach((b) => b.classList.remove('active'));
+    document.querySelectorAll('.msg-row.show-menu').forEach((r) => r.classList.remove('show-menu'));
+    document.querySelectorAll('.chat-item-dropdown:not([hidden])').forEach((d) => (d.hidden = true));
+    document.querySelectorAll('.chat-item-down-btn.active').forEach((b) => b.classList.remove('active'));
+    if (el.convDropdown) el.convDropdown.hidden = true;
+  }
+
   function renderConversations() {
     el.chatList.replaceChildren();
     const list = searchTerm
@@ -831,7 +848,81 @@
       }
 
       textDiv.append(topDiv, snippet);
-      li.append(avatar, textDiv);
+
+      // Down-arrow options dropdown for conversation (Delete chat)
+      const itemMenuWrap = document.createElement('div');
+      itemMenuWrap.className = 'chat-item-menu-wrap';
+
+      const itemDownBtn = document.createElement('button');
+      itemDownBtn.type = 'button';
+      itemDownBtn.className = 'chat-item-down-btn';
+      itemDownBtn.title = 'Chat options';
+      itemDownBtn.setAttribute('aria-label', 'Chat options');
+      itemDownBtn.innerHTML = '<svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>';
+
+      const itemDropdown = document.createElement('div');
+      itemDropdown.className = 'chat-item-dropdown';
+      itemDropdown.hidden = true;
+
+      const delChatOption = document.createElement('button');
+      delChatOption.type = 'button';
+      delChatOption.className = 'conv-dropdown-item danger';
+      delChatOption.innerHTML = '<svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg><span>Delete Chat</span>';
+      delChatOption.onclick = (e) => {
+        e.stopPropagation();
+        itemDropdown.hidden = true;
+        state.activeConversationId = conv.id;
+        if (el.deleteConvDialog) el.deleteConvDialog.showModal();
+      };
+      itemDropdown.appendChild(delChatOption);
+
+      function toggleItemDropdown(e) {
+        if (e) {
+          e.stopPropagation();
+        }
+        const willShow = itemDropdown.hidden;
+        closeAllDropdowns();
+        itemDropdown.hidden = !willShow;
+        if (!itemDropdown.hidden) itemDownBtn.classList.add('active');
+      }
+
+      itemDownBtn.onclick = toggleItemDropdown;
+
+      // Right-click contextmenu on conversation item
+      li.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        toggleItemDropdown(e);
+      });
+
+      // Long press on mobile touch screen
+      let convTouchTimer = null;
+      let convTouchMoved = false;
+
+      li.addEventListener('touchstart', (e) => {
+        convTouchMoved = false;
+        convTouchTimer = setTimeout(() => {
+          if (!convTouchMoved) {
+            if (navigator.vibrate) navigator.vibrate(25);
+            toggleItemDropdown(e);
+          }
+        }, 450);
+      }, { passive: true });
+
+      li.addEventListener('touchmove', () => {
+        convTouchMoved = true;
+        if (convTouchTimer) clearTimeout(convTouchTimer);
+      }, { passive: true });
+
+      li.addEventListener('touchend', () => {
+        if (convTouchTimer) clearTimeout(convTouchTimer);
+      });
+
+      li.addEventListener('touchcancel', () => {
+        if (convTouchTimer) clearTimeout(convTouchTimer);
+      });
+
+      itemMenuWrap.append(itemDownBtn, itemDropdown);
+      li.append(avatar, textDiv, itemMenuWrap);
       el.chatList.appendChild(li);
     }
   }
@@ -860,6 +951,8 @@
       el.convSub.textContent = `${conv.phone} • ${conv.isOnline ? 'Online' : 'Offline'}`;
       el.manageGroupBtn.hidden = true;
     }
+    if (el.convMoreWrap) el.convMoreWrap.hidden = false;
+    if (el.convDropdown) el.convDropdown.hidden = true;
     el.deleteConvBtn.hidden = false;
 
     el.input.disabled = false;
@@ -948,30 +1041,36 @@
     bubble.className = 'bubble';
     bubble.id = `msg-bubble-${msg.id}`;
 
+    let textP = null;
     if (msg.text) {
-      const p = document.createElement('p');
-      p.textContent = msg.text;
-      bubble.appendChild(p);
+      textP = document.createElement('p');
+      textP.textContent = msg.text;
+      bubble.appendChild(textP);
     }
 
     // Media (Photo, Video, or Audio / Voice Note)
     const mediaUrl = msg.mediaUrl || msg.media_url;
+    let isAudio = false;
+    let isVideo = false;
+    let mediaDiv = null;
+
     if (mediaUrl) {
-      const mediaDiv = document.createElement('div');
+      mediaDiv = document.createElement('div');
       const rawType = (msg.mediaType || msg.media_type || '').toLowerCase();
       const mediaName = (msg.mediaName || msg.media_name || '').toLowerCase();
-      const isAudio =
+      isAudio =
         rawType === 'audio' ||
         rawType.startsWith('audio/') ||
         mediaName.includes('voice note') ||
         /\.(webm|ogg|wav|mp3|m4a|aac|opus)(\?|$)/i.test(mediaUrl);
-      const isVideo =
+      isVideo =
         !isAudio &&
         (rawType === 'video' ||
          rawType.startsWith('video/') ||
          /\.(mp4|mov|mkv)(\?|$)/i.test(mediaUrl));
 
       if (isAudio) {
+        bubble.classList.add('has-audio');
         mediaDiv.className = 'msg-media msg-audio';
         const header = document.createElement('div');
         header.className = 'voice-bubble-header';
@@ -983,6 +1082,11 @@
         audio.preload = 'metadata';
         mediaDiv.append(header, audio);
       } else if (isVideo) {
+        if (!msg.text) {
+          bubble.classList.add('has-media-only');
+        } else {
+          bubble.classList.add('has-media');
+        }
         mediaDiv.className = 'msg-media';
         const video = document.createElement('video');
         video.src = mediaUrl;
@@ -990,6 +1094,11 @@
         video.preload = 'metadata';
         mediaDiv.appendChild(video);
       } else {
+        if (!msg.text) {
+          bubble.classList.add('has-media-only');
+        } else {
+          bubble.classList.add('has-media');
+        }
         mediaDiv.className = 'msg-media';
         const img = document.createElement('img');
         img.src = mediaUrl;
@@ -1003,17 +1112,80 @@
 
     bodyDiv.append(meta, bubble);
 
-    // Actions toolbar (Copy & Delete)
-    const actions = document.createElement('div');
-    actions.className = 'msg-actions';
+    // Message options menu (down arrow on hover, right click, mobile long-press)
+    const menuWrap = document.createElement('div');
+    menuWrap.className = 'msg-menu-wrap';
 
+    const downBtn = document.createElement('button');
+    downBtn.type = 'button';
+    downBtn.className = 'msg-down-btn';
+    downBtn.title = 'Message options';
+    downBtn.setAttribute('aria-label', 'Message options');
+    downBtn.innerHTML = '<svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>';
+
+    const dropdown = document.createElement('div');
+    dropdown.className = 'msg-dropdown';
+    dropdown.hidden = true;
+
+    function toggleMsgMenu(e) {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      const willOpen = dropdown.hidden;
+      closeAllDropdowns();
+      if (willOpen) {
+        dropdown.hidden = false;
+        downBtn.classList.add('active');
+        li.classList.add('show-menu');
+      }
+    }
+
+    downBtn.onclick = (e) => toggleMsgMenu(e);
+
+    // Context menu (Right-click) on bubble
+    bubble.addEventListener('contextmenu', (e) => {
+      toggleMsgMenu(e);
+    });
+
+    // Touchscreen Long-Press (420ms)
+    let touchTimer = null;
+    let touchMoved = false;
+
+    bubble.addEventListener('touchstart', (e) => {
+      touchMoved = false;
+      touchTimer = setTimeout(() => {
+        if (!touchMoved) {
+          if (navigator.vibrate) {
+            try { navigator.vibrate(25); } catch {}
+          }
+          toggleMsgMenu(e);
+        }
+      }, 420);
+    }, { passive: true });
+
+    bubble.addEventListener('touchmove', () => {
+      touchMoved = true;
+      if (touchTimer) clearTimeout(touchTimer);
+    }, { passive: true });
+
+    bubble.addEventListener('touchend', () => {
+      if (touchTimer) clearTimeout(touchTimer);
+    });
+
+    bubble.addEventListener('touchcancel', () => {
+      if (touchTimer) clearTimeout(touchTimer);
+    });
+
+    // Option 1: Copy Text
     if (msg.text) {
-      const copyBtn = document.createElement('button');
-      copyBtn.type = 'button';
-      copyBtn.className = 'action-btn';
-      copyBtn.title = 'Copy message';
-      copyBtn.innerHTML = '<svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
-      copyBtn.onclick = async () => {
+      const copyItem = document.createElement('button');
+      copyItem.type = 'button';
+      copyItem.className = 'msg-dropdown-item';
+      copyItem.innerHTML = '<svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><span>Copy text</span>';
+      copyItem.onclick = async (e) => {
+        e.stopPropagation();
+        closeAllDropdowns();
         try {
           await navigator.clipboard.writeText(msg.text);
           toast('Copied message to clipboard');
@@ -1021,30 +1193,65 @@
           toast('Failed to copy');
         }
       };
-      actions.appendChild(copyBtn);
+      dropdown.appendChild(copyItem);
+
+      // Option 2: Select Text
+      const selectItem = document.createElement('button');
+      selectItem.type = 'button';
+      selectItem.className = 'msg-dropdown-item';
+      selectItem.innerHTML = '<svg viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg><span>Select text</span>';
+      selectItem.onclick = (e) => {
+        e.stopPropagation();
+        closeAllDropdowns();
+        if (textP) {
+          const sel = window.getSelection();
+          const range = document.createRange();
+          range.selectNodeContents(textP);
+          sel.removeAllRanges();
+          sel.addRange(range);
+          toast('Text selected');
+        }
+      };
+      dropdown.appendChild(selectItem);
     }
 
+    // Option 3: Copy Media Link (if media present)
+    if (mediaUrl) {
+      const copyMediaItem = document.createElement('button');
+      copyMediaItem.type = 'button';
+      copyMediaItem.className = 'msg-dropdown-item';
+      copyMediaItem.innerHTML = '<svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg><span>Copy media link</span>';
+      copyMediaItem.onclick = async (e) => {
+        e.stopPropagation();
+        closeAllDropdowns();
+        try {
+          const fullUrl = new URL(mediaUrl, window.location.origin).href;
+          await navigator.clipboard.writeText(fullUrl);
+          toast('Media link copied');
+        } catch {
+          toast('Failed to copy');
+        }
+      };
+      dropdown.appendChild(copyMediaItem);
+    }
+
+    // Option 4: Delete Message (if owner or admin)
     if (isOwn || (state.user && state.user.is_admin)) {
-      const delBtn = document.createElement('button');
-      delBtn.type = 'button';
-      delBtn.className = 'action-btn del-btn';
-      delBtn.title = 'Delete message';
-      delBtn.innerHTML = '<svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
-      delBtn.onclick = () => deleteMessage(msg.id);
-      actions.appendChild(delBtn);
+      const delItem = document.createElement('button');
+      delItem.type = 'button';
+      delItem.className = 'msg-dropdown-item danger';
+      delItem.innerHTML = '<svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg><span>Delete message</span>';
+      delItem.onclick = (e) => {
+        e.stopPropagation();
+        closeAllDropdowns();
+        deleteMessage(msg.id);
+      };
+      dropdown.appendChild(delItem);
     }
 
-    if (actions.children.length > 0) {
-      li.appendChild(actions);
-
-      // Mobile / Touchscreen tap to show action toolbar
-      li.addEventListener('click', (e) => {
-        if (e.target.closest('.action-btn') || e.target.closest('img') || e.target.closest('video')) return;
-        document.querySelectorAll('.msg-row.show-actions').forEach((r) => {
-          if (r !== li) r.classList.remove('show-actions');
-        });
-        li.classList.toggle('show-actions');
-      });
+    if (dropdown.children.length > 0) {
+      menuWrap.append(downBtn, dropdown);
+      li.appendChild(menuWrap);
     }
 
     li.appendChild(bodyDiv);
@@ -1055,6 +1262,11 @@
     if (!confirm('Delete this message?')) return;
     try {
       await api(`/api/messages/${msgId}`, { method: 'DELETE' });
+      const row = $(`msg-${msgId}`);
+      if (row) {
+        const menu = row.querySelector('.msg-menu-wrap');
+        if (menu) menu.remove();
+      }
       const bubble = $(`msg-bubble-${msgId}`);
       if (bubble) {
         bubble.className = 'bubble deleted';
@@ -1444,8 +1656,27 @@
       sub.className = 'friend-item-sub';
       sub.textContent = `${f.phone} • ${f.isOnline ? 'Online' : 'Offline'}`;
 
+      const unfriendBtn = document.createElement('button');
+      unfriendBtn.type = 'button';
+      unfriendBtn.className = 'btn-unfriend';
+      unfriendBtn.title = `Unfriend ${f.name}`;
+      unfriendBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="18" y1="8" x2="23" y2="13"/><line x1="23" y1="8" x2="18" y2="13"/></svg><span>Unfriend</span>';
+      unfriendBtn.onclick = async (e) => {
+        e.stopPropagation();
+        if (!confirm(`Are you sure you want to unfriend ${f.name}?`)) return;
+        try {
+          await api(`/api/friends/${f.id}`, { method: 'DELETE' });
+          toast(`Unfriended ${f.name}`);
+          state.friends = state.friends.filter((item) => item.id !== f.id);
+          renderFriends();
+          loadConversations();
+        } catch (err) {
+          toast(err.message || 'Could not unfriend');
+        }
+      };
+
       textDiv.append(topDiv, sub);
-      li.append(avatar, textDiv);
+      li.append(avatar, textDiv, unfriendBtn);
       el.friendList.appendChild(li);
     }
   }
@@ -1733,8 +1964,21 @@
   };
 
   /* ------------------------------------------------------------- delete conversation ("delete for me") */
+  if (el.convMoreBtn) {
+    el.convMoreBtn.onclick = (e) => {
+      e.stopPropagation();
+      const willOpen = el.convDropdown ? el.convDropdown.hidden : false;
+      closeAllDropdowns();
+      if (el.convDropdown && willOpen) {
+        el.convDropdown.hidden = false;
+      }
+    };
+  }
+
   if (el.deleteConvBtn) {
-    el.deleteConvBtn.onclick = () => {
+    el.deleteConvBtn.onclick = (e) => {
+      e.stopPropagation();
+      closeAllDropdowns();
       if (!state.activeConversationId) return;
       el.deleteConvDialog.showModal();
     };
@@ -1750,7 +1994,8 @@
         el.deleteConvDialog.close();
 
         state.activeConversationId = null;
-        el.deleteConvBtn.hidden = true;
+        if (el.convMoreWrap) el.convMoreWrap.hidden = true;
+        if (el.convDropdown) el.convDropdown.hidden = true;
         el.manageGroupBtn.hidden = true;
         el.convTitle.textContent = 'Select a conversation';
         el.convSub.textContent = 'or start a new chat';
@@ -2252,14 +2497,14 @@
     updateMenuButton();
   });
 
-  el.log.addEventListener('click', (e) => {
-    if (!e.target.closest('.msg-row')) {
-      document.querySelectorAll('.msg-row.show-actions').forEach((r) => r.classList.remove('show-actions'));
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.msg-menu-wrap') && !e.target.closest('.chat-item-menu-wrap') && !e.target.closest('.conv-more-wrap')) {
+      closeAllDropdowns();
     }
   });
 
   function toggleTheme() {
-    const current = document.documentElement.getAttribute('data-theme');
+    const current = document.documentElement.getAttribute('data-theme') || 'dark';
     const next = current === 'dark' ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', next);
     localStorage.setItem('chatbox.theme', next);
@@ -2267,7 +2512,7 @@
   }
 
   function paintTheme() {
-    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const isDark = (document.documentElement.getAttribute('data-theme') || 'dark') === 'dark';
     el.iconMoon.hidden = isDark;
     el.iconSun.hidden = !isDark;
   }
@@ -2319,6 +2564,9 @@
   }
 
   /* ------------------------------------------------------------- init */
+  if (!document.documentElement.getAttribute('data-theme')) {
+    document.documentElement.setAttribute('data-theme', 'dark');
+  }
   paintTheme();
   initEmojiPicker();
   checkInitialAuth();
