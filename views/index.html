@@ -6,9 +6,10 @@
   <meta name="color-scheme" content="light dark">
   <meta name="app-base" content="{{BASE}}">
   <title>chatbox</title>
-  <link rel="icon" type="image/svg+xml" href="{{BASE}}/static/favicon.svg">
-  <link rel="alternate icon" href="{{BASE}}/static/favicon.svg">
-  <link rel="apple-touch-icon" href="{{BASE}}/static/favicon.svg">
+  <link rel="icon" type="image/svg+xml" href="{{BASE}}/static/favicon.svg?v={{VERSION}}">
+  <link rel="shortcut icon" href="{{BASE}}/static/favicon.svg?v={{VERSION}}">
+  <link rel="alternate icon" href="{{BASE}}/static/favicon.svg?v={{VERSION}}">
+  <link rel="apple-touch-icon" href="{{BASE}}/static/favicon.svg?v={{VERSION}}">
   <link rel="stylesheet" href="{{BASE}}/static/app.css?v={{VERSION}}">
   <style>
     [hidden] { display: none !important; }
@@ -132,6 +133,7 @@
         <button type="button" class="nav-tab" id="nav-friends">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
           <span>Friends</span>
+          <span class="nav-badge" id="nav-friends-badge" hidden>0</span>
         </button>
         <button type="button" class="nav-tab admin-only" id="nav-admin" hidden>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>

@@ -355,9 +355,12 @@ app.use((req, res, next) => {
   next();
 });
 
-// Favicon route for browser root requests
-app.get('/favicon.ico', (req, res) => {
+// Favicon route with explicit no-cache headers to overwrite old browser-cached favicons
+app.get(['/favicon.ico', '/static/favicon.svg'], (req, res) => {
   res.setHeader('Content-Type', 'image/svg+xml');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   res.sendFile(path.join(__dirname, 'public', 'favicon.svg'));
 });
 
@@ -718,6 +721,9 @@ app.post('/api/friends/requests/:id/accept', authMiddleware, async (req, res) =>
     io.to(`u:${senderId}`).emit('friend_request_accepted', {
       friend: { id: req.user.id, name: req.user.name, phone: req.user.phone, avatarColor: req.user.avatar_color, avatarUrl: req.user.avatar_url }
     });
+    io.to(`u:${req.user.id}`).emit('friend_request_accepted', {
+      friend: { id: senderId, name: sender ? sender.name : 'Friend', phone: sender ? sender.phone : '', avatarColor: sender ? sender.avatar_color : 0, avatarUrl: sender ? sender.avatar_url : null }
+    });
 
     res.json({
       ok: true,
@@ -918,6 +924,11 @@ app.post('/api/conversations/direct', authMiddleware, async (req, res) => {
         [convId, req.user.id, 'member', otherId, 'member']
       );
     }
+
+    // Real-time broadcast to both users so neither has to refresh
+    io.to(`u:${req.user.id}`).to(`u:${otherId}`).emit('conversation_created', {
+      conversationId: convId,
+    });
 
     res.json({
       ok: true,
@@ -1558,19 +1569,29 @@ io.on('connection', async (socket) => {
       // Update conversation updated_at
       await pool.query('UPDATE chat_conversations SET updated_at = now() WHERE id = $1', [convId]);
 
-      // Broadcast to all sockets currently viewing this conversation room
-      io.to(`c:${convId}`).emit('message', msg);
-
-      // Also notify members' user rooms for live sidebar updates & browser notification
+      // Fetch conversation members
       const members = await pool.query(
         'SELECT user_id FROM chat_conversation_members WHERE conversation_id = $1',
         [convId]
       );
+
+      // Broadcast to active conversation room AND each member's personal user room
+      // (ensures members who haven't opened the conversation yet receive the live message instantly)
+      const targetRooms = [`c:${convId}`];
+      for (const m of members.rows) {
+        targetRooms.push(`u:${m.user_id}`);
+      }
+      io.to(targetRooms).emit('message', msg);
+
+      const snippetText = mediaType === 'audio'
+        ? '🎤 Voice note'
+        : (mediaType === 'image' ? '📷 Photo' : (mediaType === 'video' ? '🎥 Video' : text));
+
       for (const m of members.rows) {
         io.to(`u:${m.user_id}`).emit('conversation_updated', {
           conversationId: convId,
           lastMessage: {
-            text: mediaType ? `[${mediaType}]` : text,
+            text: snippetText,
             senderName: user.name,
             ts: msg.ts,
           },

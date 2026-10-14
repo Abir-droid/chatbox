@@ -77,8 +77,8 @@
   --bubble-own-shadow: 0 4px 14px rgba(37, 99, 235, 0.22);
   --bubble-other: #ffffff;
   --bubble-other-ink: #0f172a;
-  --bubble-other-line: #e2e8f0;
-  --bubble-other-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+  --bubble-other-line: rgba(226, 232, 240, 0.45);
+  --bubble-other-shadow: 0 1px 4px rgba(15, 23, 42, 0.03);
 }
 
 [data-theme="dark"] {
@@ -138,8 +138,8 @@
   --bubble-own-shadow: 0 4px 16px rgba(29, 78, 216, 0.35);
   --bubble-other: #0f182c;
   --bubble-other-ink: #f8fafc;
-  --bubble-other-line: #1c2b4a;
-  --bubble-other-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --bubble-other-line: rgba(255, 255, 255, 0.06);
+  --bubble-other-shadow: 0 1px 6px rgba(0, 0, 0, 0.25);
 }
 
 /* ------------------------------------------------------------------- base reset */
@@ -758,6 +758,22 @@ button:active {
   color: var(--rail-active-ink);
 }
 
+.nav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--danger);
+  color: #ffffff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  border-radius: 999px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  line-height: 1;
+  margin-left: auto;
+}
+
 .rail-panel {
   flex: 1;
   overflow-y: auto;
@@ -1245,12 +1261,13 @@ button:active {
   transform: translateY(-1px);
 }
 
-/* Media in Chat Bubbles */
+/* Media in Chat Bubbles - borderless & sleek */
 .msg-media {
-  margin-top: 0.5rem;
-  border-radius: 12px;
+  margin-top: 0.35rem;
+  border-radius: 10px;
   overflow: hidden;
   max-width: 400px;
+  border: none !important;
 }
 
 .msg-media img {
@@ -1260,7 +1277,8 @@ button:active {
   object-fit: cover;
   display: block;
   cursor: zoom-in;
-  border-radius: 12px;
+  border-radius: 10px;
+  border: none !important;
   transition: transform 0.2s ease;
 }
 
@@ -1271,7 +1289,30 @@ button:active {
 .msg-media video {
   width: 100%;
   max-height: 340px;
-  border-radius: 12px;
+  border-radius: 10px;
+  background: #000;
+  border: none !important;
+  display: block;
+}
+
+/* Subtle, ultra-thin border for media and voice note bubbles */
+.bubble:has(.msg-media),
+.bubble:has(.msg-audio),
+.bubble.has-media {
+  border: 0.5px solid rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="dark"] .bubble:has(.msg-media),
+[data-theme="dark"] .bubble:has(.msg-audio),
+[data-theme="dark"] .bubble.has-media {
+  border: 0.5px solid rgba(255, 255, 255, 0.04);
+}
+
+.msg-row.own .bubble:has(.msg-media),
+.msg-row.own .bubble:has(.msg-audio),
+.msg-row.own .bubble.has-media {
+  border: none !important;
+}
   background: #000;
   display: block;
 }
@@ -2200,44 +2241,47 @@ dialog[open] .dialog-card {
   font-size: 1.8rem;
 }
 
-/* Audio Voice Message Player */
+/* Audio Voice Message Player - borderless */
 .msg-audio {
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
-  min-width: 250px;
-  max-width: 340px;
-  padding: 0.25rem 0.1rem;
+  gap: 0.35rem;
+  min-width: 240px;
+  max-width: 330px;
+  padding: 0.15rem 0;
+  border: none !important;
 }
 
 .voice-bubble-header {
   display: flex;
   align-items: center;
-  gap: 0.45rem;
-  font-size: 0.82rem;
+  gap: 0.4rem;
+  font-size: 0.78rem;
   font-weight: 600;
   letter-spacing: 0.01em;
-  opacity: 0.9;
+  opacity: 0.88;
 }
 
 .voice-bubble-icon {
-  width: 15px;
-  height: 15px;
+  width: 14px;
+  height: 14px;
   stroke: currentColor;
-  stroke-width: 2.2;
+  stroke-width: 2;
   fill: none;
 }
 
 .msg-audio audio {
   width: 100%;
-  height: 38px;
-  border-radius: 20px;
+  height: 36px;
+  border-radius: 18px;
   outline: none;
-  background: rgba(0, 0, 0, 0.05);
+  border: none !important;
+  background: rgba(0, 0, 0, 0.04);
 }
 
 .msg-row.own .msg-audio audio {
-  filter: contrast(110%);
+  background: rgba(255, 255, 255, 0.14);
+  filter: contrast(105%);
 }
 
 /* Friends Sub-Tabs (My Friends / Friend Requests) */

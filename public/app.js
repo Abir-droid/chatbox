@@ -32,6 +32,7 @@
 
     navChats: $('nav-chats'),
     navFriends: $('nav-friends'),
+    navFriendsBadge: $('nav-friends-badge'),
     navAdmin: $('nav-admin'),
     panelChats: $('panel-chats'),
     panelFriends: $('panel-friends'),
@@ -162,6 +163,19 @@
   };
 
   let socket = null;
+
+  // Force update browser tab favicon with dynamic cache buster to override stale green icon
+  try {
+    const faviconUrl = `${BASE}/static/favicon.svg?t=${Date.now()}`;
+    let link = document.querySelector("link[rel*='icon']");
+    if (!link) {
+      link = document.createElement('link');
+      link.rel = 'icon';
+      document.head.appendChild(link);
+    }
+    link.type = 'image/svg+xml';
+    link.href = faviconUrl;
+  } catch {}
 
   /* ------------------------------------------------------------- app loader */
   function setLoaderStatus(text) {
@@ -612,47 +626,70 @@
     });
 
     socket.on('friend_request_received', ({ sender }) => {
-      playChime();
+      playReceiveSound();
       toast(`Friend request received from ${sender.name}!`);
       loadFriendRequests();
+      loadFriends();
     });
 
     socket.on('friend_request_accepted', ({ friend }) => {
-      playChime();
+      playReceiveSound();
       toast(`${friend.name} accepted your friend request!`);
       loadFriends();
       loadConversations();
       loadFriendRequests();
     });
 
+    socket.on('conversation_created', ({ conversationId }) => {
+      loadConversations();
+      if (socket && conversationId) {
+        socket.emit('join_conversation', { conversationId });
+      }
+    });
+
+    socket.on('conversation_updated', ({ conversationId }) => {
+      loadConversations();
+    });
+
     socket.on('message', (msg) => {
+      if (!msg) return;
+
+      // Auto-join this conversation room on socket so future messages arrive via room as well
+      if (socket && msg.conversationId) {
+        socket.emit('join_conversation', { conversationId: msg.conversationId });
+      }
+
       const isCurrent = state.activeConversationId === msg.conversationId;
       if (isCurrent) {
         appendMessage(msg);
         scrollToBottom();
       }
 
+      const displayText = msg.mediaType === 'audio'
+        ? '🎤 Voice note'
+        : (msg.mediaType === 'image' ? '📷 Photo' : (msg.mediaType === 'video' ? '🎥 Video' : msg.text));
+
       // Update sidebar preview
-      const conv = state.conversations.find((c) => c.id === msg.conversationId);
+      let conv = state.conversations.find((c) => c.id === msg.conversationId);
       if (conv) {
         conv.lastMessage = {
-          text: msg.mediaType ? `[${msg.mediaType}]` : msg.text,
+          text: displayText,
           senderName: msg.senderName,
           ts: msg.ts,
         };
+        // Move to top of chat list
+        state.conversations = [conv, ...state.conversations.filter((c) => c.id !== conv.id)];
         renderConversations();
       } else {
-        // May have unhidden a previously deleted/cleared conversation
+        // Conversation is new or unhidden: reload conversations immediately without refresh!
         loadConversations();
       }
 
       // Audio & Desktop notification if from someone else
       if (msg.senderId !== state.user.id) {
-        playChime();
+        playReceiveSound();
         const title = conv ? (conv.type === 'group' ? `${conv.name} (${msg.senderName})` : msg.senderName) : msg.senderName;
-        const bodyText = msg.mediaType
-          ? (msg.mediaType === 'image' ? '📷 Sent a photo' : (msg.mediaType === 'audio' ? '🎤 Voice message' : '🎥 Sent a video'))
-          : msg.text;
+        const bodyText = displayText;
         if (document.hidden || !isCurrent) {
           sendBrowserNotification(title, bodyText, msg.conversationId);
         }
@@ -1424,13 +1461,14 @@
       const data = await api('/api/friends/requests');
       state.friendRequests = data.requests || [];
       renderFriendRequests();
+      const count = state.friendRequests.length;
       if (el.requestsBadge) {
-        if (state.friendRequests.length > 0) {
-          el.requestsBadge.textContent = state.friendRequests.length;
-          el.requestsBadge.hidden = false;
-        } else {
-          el.requestsBadge.hidden = true;
-        }
+        el.requestsBadge.textContent = count;
+        el.requestsBadge.hidden = count === 0;
+      }
+      if (el.navFriendsBadge) {
+        el.navFriendsBadge.textContent = count;
+        el.navFriendsBadge.hidden = count === 0;
       }
     } catch (err) {
       console.error('loadFriendRequests error:', err);

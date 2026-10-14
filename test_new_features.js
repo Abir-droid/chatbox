@@ -303,6 +303,64 @@ async function run() {
   assert.equal(voiceMsg.mediaName, 'Voice note');
   console.log('  ✔ Voice note audio message exchanged and verified in history');
 
+  // [Test 7] Instant Real-Time Messaging to a User who has not opened the conversation room
+  console.log('\n[Test 7] Real-Time Notification & Messaging to New Person (No refresh needed)...');
+  const regFrank = await request('/api/auth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: { name: 'Frank', phone: '01799999999', password: 'password123' },
+  });
+  const tokenFrank = regFrank.json.token;
+  const userFrank = regFrank.json.user;
+
+  const socketFrank = Client(`http://127.0.0.1:${PORT}`, {
+    auth: { token: tokenFrank },
+    transports: ['websocket'],
+  });
+  await new Promise((resolve) => socketFrank.on('connect', resolve));
+
+  await request('/api/friends/add', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${tokenDave}`, 'Content-Type': 'application/json' },
+    body: { phone: userFrank.phone },
+  });
+
+  const directFrankRes = await request('/api/conversations/direct', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${tokenDave}`, 'Content-Type': 'application/json' },
+    body: { phone: userFrank.phone },
+  });
+  const convIdFrank = directFrankRes.json.conversation.id;
+
+  const frankReceivedPromise = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Frank did not receive live message via user room')), 4000);
+    socketFrank.on('message', (msg) => {
+      if (msg.conversationId === convIdFrank && msg.text === 'Hello Frank without refresh!') {
+        clearTimeout(timer);
+        resolve(msg);
+      }
+    });
+  });
+
+  await new Promise((resolve) => {
+    socketDave.emit(
+      'message',
+      {
+        conversationId: convIdFrank,
+        text: 'Hello Frank without refresh!',
+      },
+      (ack) => {
+        assert.equal(ack.ok, true);
+        resolve();
+      }
+    );
+  });
+
+  const frankMsg = await frankReceivedPromise;
+  assert.equal(frankMsg.text, 'Hello Frank without refresh!');
+  console.log('  ✔ Frank received live message in real time without refreshing or opening the chat!');
+
+  socketFrank.disconnect();
   socketDave.disconnect();
   socketEmma.disconnect();
   server.close();
