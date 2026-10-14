@@ -155,12 +155,14 @@
 
 html, body {
   height: 100%;
+  height: 100dvh;
   font-family: var(--font-body);
   background: var(--bg);
   color: var(--ink);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
 button, input, textarea {
@@ -586,7 +588,8 @@ button:active {
 .app {
   display: grid;
   grid-template-columns: 320px 1fr;
-  height: 100vh;
+  height: 100%;
+  height: 100dvh;
   overflow: hidden;
   background: var(--bg);
 }
@@ -2155,40 +2158,393 @@ dialog[open] .dialog-card {
   to { transform: translateY(0) scale(1); opacity: 1; }
 }
 
-/* Responsive */
+/* ==========================================================================
+   Responsive Styles for Mobile & Phone Viewing
+   ========================================================================== */
+
 @media (max-width: 768px) {
+  /* Prevent iOS automatic zoom on focus by ensuring font-size >= 16px */
+  input, textarea, select {
+    font-size: 16px !important;
+  }
+
   .app {
     grid-template-columns: 1fr;
+    height: 100%;
+    height: 100dvh;
+    position: relative;
+    overflow: hidden;
   }
+
+  /* Slide-over Rail Sidebar Drawer */
   .rail {
     position: fixed;
     top: 0;
     bottom: 0;
     left: 0;
-    width: 290px;
+    width: min(320px, 86vw);
+    height: 100%;
+    height: 100dvh;
     z-index: 150;
     transform: translateX(-100%);
     transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: none;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
+
   .app.rail-open .rail {
     transform: translateX(0);
-    box-shadow: 0 0 30px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.7);
   }
+
   .scrim {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.5);
+    background: rgba(0, 0, 0, 0.55);
     backdrop-filter: blur(4px);
     z-index: 140;
+    touch-action: none;
     animation: fadeIn 0.2s ease;
   }
+
+  /* Thread Header on Phone */
+  .thread {
+    height: 100%;
+    height: 100dvh;
+    width: 100%;
+  }
+
+  .thread-head {
+    padding: 0.55rem 0.75rem;
+    padding-top: max(0.55rem, env(safe-area-inset-top));
+    gap: 0.5rem;
+  }
+
   .menu-btn {
     display: inline-flex;
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    margin-right: 0.2rem;
   }
+
+  .conv-details {
+    min-width: 0;
+    flex: 1;
+    gap: 0.6rem;
+  }
+
+  .conv-avatar-wrap .avatar {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    font-size: 0.88rem;
+  }
+
+  .conv-title {
+    font-size: 1rem;
+    max-width: 180px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .conv-sub {
+    font-size: 0.75rem;
+    max-width: 180px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .conv-actions {
+    flex-shrink: 0;
+  }
+
+  .btn-secondary {
+    padding: 0.4rem 0.65rem;
+    font-size: 0.8rem;
+    border-radius: 8px;
+  }
+
+  /* Messages Log on Phone */
+  .log {
+    padding: 0.75rem 0.65rem;
+    gap: 0.5rem;
+  }
+
+  .empty-state {
+    padding: 1.5rem 1rem;
+    max-width: 280px;
+  }
+
+  .empty-icon-wrap {
+    width: 56px;
+    height: 56px;
+    margin-bottom: 0.9rem;
+  }
+
+  .empty-title {
+    font-size: 1.1rem;
+  }
+
+  .empty-text {
+    font-size: 0.85rem;
+  }
+
+  .msg-row {
+    max-width: 88%;
+    gap: 0.5rem;
+  }
+
+  .msg-row .avatar {
+    width: 28px !important;
+    height: 28px !important;
+    min-width: 28px !important;
+    font-size: 0.72rem !important;
+  }
+
+  .bubble {
+    padding: 0.65rem 0.85rem;
+    font-size: 0.92rem;
+    line-height: 1.4;
+    border-radius: 16px 16px 16px 4px;
+  }
+
+  .msg-row.own .bubble {
+    border-radius: 16px 16px 4px 16px;
+  }
+
+  .msg-media {
+    max-width: 280px;
+  }
+
+  .msg-media img, .msg-media video {
+    max-height: 240px;
+  }
+
+  /* Tap / selected state on touchscreen reveals message actions */
+  .msg-row.show-actions .msg-actions {
+    display: flex;
+  }
+
+  /* Jump to bottom on Phone */
+  .jump {
+    bottom: 70px;
+    right: 0.85rem;
+    padding: 0.45rem 0.8rem;
+    font-size: 0.78rem;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  }
+
+  /* Typing Indicator on Phone */
+  .typing {
+    padding: 0.25rem 0.85rem;
+    min-height: 1.5rem;
+  }
+
+  .typing-bubble {
+    padding: 0.25rem 0.65rem;
+  }
+
+  /* Media Preview Bar on Phone */
+  .media-preview-bar {
+    padding: 0.5rem 0.85rem;
+    gap: 0.65rem;
+  }
+
+  .media-thumb {
+    width: 38px;
+    height: 38px;
+  }
+
+  .media-name {
+    font-size: 0.82rem;
+  }
+
+  /* Composer Bar on Phone */
+  .composer {
+    padding: 0.45rem 0.6rem;
+    padding-bottom: max(0.45rem, env(safe-area-inset-bottom));
+    gap: 0.35rem;
+  }
+
+  .composer-btn {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    padding: 0;
+  }
+
+  .composer-btn svg {
+    width: 19px;
+    height: 19px;
+  }
+
+  .composer textarea {
+    padding: 0.55rem 0.85rem;
+    border-radius: 18px;
+    max-height: 100px;
+    line-height: 1.35;
+  }
+
+  .composer .send {
+    padding: 0.55rem 0.85rem;
+    gap: 0.35rem;
+    border-radius: 18px;
+  }
+
+  /* Emoji Picker on Mobile Phone */
+  .emoji-picker {
+    position: fixed;
+    bottom: calc(56px + max(0.5rem, env(safe-area-inset-bottom)));
+    left: 8px;
+    right: 8px;
+    width: auto;
+    max-height: 210px;
+    grid-template-columns: repeat(8, 1fr);
+    z-index: 200;
+  }
+
+  .emoji-btn-item {
+    font-size: 1.25rem;
+    padding: 4px;
+  }
+
+  /* Dialogs / Modals on Phone */
+  dialog {
+    max-width: 95vw;
+    width: 100%;
+    max-height: 92vh;
+    max-height: 92dvh;
+    margin: auto;
+  }
+
+  .dialog-card {
+    width: 100%;
+    max-width: 94vw;
+    padding: 1.35rem 1rem;
+    border-radius: 18px;
+  }
+
+  .dialog-card.large {
+    width: 100%;
+    max-width: 94vw;
+  }
+
+  .dialog-card.full {
+    width: 95vw;
+    max-width: 95vw;
+    height: 90vh;
+    height: 90dvh;
+    padding: 1.15rem 0.85rem;
+  }
+
+  .dialog-header h2 {
+    font-size: 1.1rem;
+  }
+
   .admin-stats-grid {
     grid-template-columns: repeat(2, 1fr);
+    gap: 0.6rem;
+    margin-bottom: 1rem;
   }
+
+  .stat-card {
+    padding: 0.75rem;
+  }
+
+  .stat-num {
+    font-size: 1.45rem;
+  }
+
   .audit-layout {
     grid-template-columns: 1fr;
+    gap: 0.85rem;
+    min-height: 0;
+  }
+
+  .audit-sidebar {
+    max-height: 170px;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+    padding-right: 0;
+    padding-bottom: 0.65rem;
+  }
+
+  /* Auth Screen on Phone */
+  .auth-screen {
+    padding: 1rem 0.75rem;
+    align-items: center;
+  }
+
+  .auth-card {
+    padding: 1.75rem 1.15rem;
+    border-radius: 20px;
+  }
+
+  .auth-title {
+    font-size: 1.7rem;
+  }
+
+  .auth-subtitle {
+    font-size: 0.85rem;
+  }
+
+  .auth-tabs {
+    margin-bottom: 1.25rem;
+  }
+
+  .auth-tab {
+    padding: 0.55rem 0.4rem;
+    font-size: 0.82rem;
+  }
+
+  /* Toasts on Phone */
+  .toasts {
+    bottom: calc(65px + max(0.5rem, env(safe-area-inset-bottom)));
+    right: 0.85rem;
+    left: 0.85rem;
+  }
+
+  .toast {
+    font-size: 0.84rem;
+    padding: 0.7rem 1rem;
+  }
+}
+
+/* Extra Compact Phone Screens (iPhone SE, smaller Androids <= 480px) */
+@media (max-width: 480px) {
+  .composer .send span {
+    display: none;
+  }
+  .composer .send {
+    width: 38px;
+    height: 38px;
+    min-width: 38px;
+    padding: 0;
+    justify-content: center;
+    border-radius: 50%;
+  }
+  .composer .send svg {
+    width: 18px;
+    height: 18px;
+  }
+  .conv-title {
+    max-width: 130px;
+  }
+  .conv-sub {
+    max-width: 130px;
+  }
+  .btn-secondary span {
+    display: none;
+  }
+  .btn-secondary {
+    padding: 0.45rem 0.55rem;
+  }
+  .btn-secondary .btn-icon {
+    width: 18px;
+    height: 18px;
   }
 }

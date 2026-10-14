@@ -333,6 +333,10 @@
     loadConversations();
     loadFriends();
     hideLoader();
+
+    if (window.innerWidth <= 768 && !state.activeConversationId) {
+      openRail();
+    }
   }
 
   /* ------------------------------------------------------------- socket */
@@ -539,6 +543,7 @@
   async function switchConversation(convId) {
     state.activeConversationId = convId;
     closeRail();
+    updateMenuButton(true);
     state.typers.clear();
     renderTyping();
 
@@ -709,6 +714,15 @@
 
     if (actions.children.length > 0) {
       li.appendChild(actions);
+
+      // Mobile / Touchscreen tap to show action toolbar
+      li.addEventListener('click', (e) => {
+        if (e.target.closest('.action-btn') || e.target.closest('img') || e.target.closest('video')) return;
+        document.querySelectorAll('.msg-row.show-actions').forEach((r) => {
+          if (r !== li) r.classList.remove('show-actions');
+        });
+        li.classList.toggle('show-actions');
+      });
     }
 
     li.appendChild(bodyDiv);
@@ -1285,16 +1299,47 @@
     el.app.classList.add('rail-open');
     el.scrim.hidden = false;
     el.menuBtn.setAttribute('aria-expanded', 'true');
+    updateMenuButton(false);
   }
 
   function closeRail() {
     el.app.classList.remove('rail-open');
     el.scrim.hidden = true;
     el.menuBtn.setAttribute('aria-expanded', 'false');
+    updateMenuButton(!!state.activeConversationId);
   }
 
-  el.menuBtn.onclick = openRail;
+  function updateMenuButton(hasActiveChat) {
+    if (!el.menuBtn) return;
+    if (window.innerWidth <= 768 && hasActiveChat) {
+      el.menuBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>';
+      el.menuBtn.setAttribute('title', 'Back to chats');
+      el.menuBtn.setAttribute('aria-label', 'Back to chats');
+    } else {
+      el.menuBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>';
+      el.menuBtn.setAttribute('title', 'Open navigation');
+      el.menuBtn.setAttribute('aria-label', 'Open navigation');
+    }
+  }
+
+  el.menuBtn.onclick = () => {
+    if (el.app.classList.contains('rail-open')) {
+      closeRail();
+    } else {
+      openRail();
+    }
+  };
   el.scrim.onclick = closeRail;
+
+  window.addEventListener('resize', () => {
+    updateMenuButton(!!state.activeConversationId);
+  });
+
+  el.log.addEventListener('click', (e) => {
+    if (!e.target.closest('.msg-row')) {
+      document.querySelectorAll('.msg-row.show-actions').forEach((r) => r.classList.remove('show-actions'));
+    }
+  });
 
   function toggleTheme() {
     const current = document.documentElement.getAttribute('data-theme');
