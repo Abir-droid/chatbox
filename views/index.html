@@ -155,12 +155,24 @@
             <span>Add Friend</span>
           </button>
         </div>
+
+        <div class="friends-sub-tabs">
+          <button type="button" class="sub-tab-btn active" id="tab-my-friends">
+            <span>My Friends</span>
+          </button>
+          <button type="button" class="sub-tab-btn" id="tab-friend-requests">
+            <span>Requests</span>
+            <span class="requests-badge" id="requests-badge" hidden>0</span>
+          </button>
+        </div>
+
         <ul class="friend-list" id="friend-list"></ul>
+        <ul class="friend-list requests-list" id="requests-list" hidden></ul>
       </div>
 
       <!-- Footer: User Profile, Notifications, Theme, Logout -->
       <div class="rail-footer">
-        <div class="me-info" id="me-info">
+        <div class="me-info" id="me-info" role="button" tabindex="0" title="Click to edit profile" aria-label="Edit Profile">
           <div class="avatar-wrap">
             <span class="avatar u" id="me-avatar" aria-hidden="true">?</span>
           </div>
@@ -168,6 +180,9 @@
             <span class="me-name" id="me-name">Loading…</span>
             <span class="me-phone" id="me-phone"></span>
           </div>
+          <button type="button" class="icon-btn edit-profile-mini-btn" id="edit-profile-btn" title="Edit Profile" aria-label="Edit Profile">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
         </div>
 
         <div class="rail-actions">
@@ -211,6 +226,10 @@
           <button type="button" class="btn-secondary" id="manage-group-btn" hidden>
             <svg viewBox="0 0 24 24" class="btn-icon" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
             <span>Members</span>
+          </button>
+          <button type="button" class="btn-secondary danger" id="delete-conv-btn" hidden title="Delete conversation for you" aria-label="Delete conversation">
+            <svg viewBox="0 0 24 24" class="btn-icon" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+            <span>Delete</span>
           </button>
         </div>
       </header>
@@ -262,6 +281,10 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
         </button>
 
+        <button type="button" class="icon-btn composer-btn" id="voice-btn" title="Record voice message" aria-label="Voice message">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+        </button>
+
         <div class="emoji-container">
           <button type="button" class="icon-btn composer-btn" id="emoji-btn" title="Add emoji" aria-label="Add emoji">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
@@ -272,13 +295,29 @@
         </div>
 
         <div class="input-container">
-          <textarea id="input" rows="1" maxlength="1500" placeholder="Type a message…" enterkeyhint="send" disabled></textarea>
+          <textarea id="input" rows="1" maxlength="1500" placeholder="Type a message (Press Enter to send, Shift+Enter for new line)…" enterkeyhint="send" disabled></textarea>
         </div>
 
         <button type="submit" class="send" id="send" disabled title="Send message" aria-label="Send">
           <svg viewBox="0 0 24 24" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
           <span>Send</span>
         </button>
+
+        <!-- Voice Recording Overlay Bar -->
+        <div class="voice-record-bar" id="voice-record-bar" hidden>
+          <div class="voice-pulse-dot"></div>
+          <span class="voice-record-timer" id="voice-record-timer">0:00</span>
+          <span class="voice-recording-label">Recording voice note…</span>
+          <div class="voice-actions">
+            <button type="button" class="icon-btn voice-cancel-btn" id="voice-cancel-btn" title="Cancel voice recording" aria-label="Cancel recording">
+              <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+            <button type="button" class="voice-send-btn" id="voice-send-btn" title="Send voice note" aria-label="Send voice note">
+              <svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              <span>Send</span>
+            </button>
+          </div>
+        </div>
       </form>
     </main>
 
@@ -397,6 +436,83 @@
       <p class="field-error" id="add-member-error"></p>
 
       <ul class="members-list" id="members-list"></ul>
+    </div>
+  </dialog>
+
+  <!-- Modal: Delete Conversation Confirmation ("Delete for me") -->
+  <dialog id="delete-conv-dialog" aria-labelledby="delete-conv-title">
+    <div class="dialog-card">
+      <div class="dialog-header">
+        <div class="dialog-title-wrap">
+          <svg viewBox="0 0 24 24" class="dialog-icon danger" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+          <h2 id="delete-conv-title">Delete Conversation</h2>
+        </div>
+        <button type="button" class="icon-btn close-dialog" data-dialog="delete-conv-dialog" aria-label="Close dialog">✕</button>
+      </div>
+      <div class="dialog-body-text">
+        <p>Delete this conversation for yourself?</p>
+        <p class="dialog-note">The conversation and its history will be removed from your chat list. The other participant will <strong>not</strong> know and their message history will remain completely intact.</p>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" class="ghost close-dialog" data-dialog="delete-conv-dialog">Cancel</button>
+        <button type="button" class="danger-btn" id="confirm-delete-conv-btn">Delete for Me</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Modal: Edit Profile -->
+  <dialog id="profile-dialog" aria-labelledby="profile-title">
+    <div class="dialog-card">
+      <div class="dialog-header">
+        <div class="dialog-title-wrap">
+          <svg viewBox="0 0 24 24" class="dialog-icon" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          <h2 id="profile-title">Edit Your Profile</h2>
+        </div>
+        <button type="button" class="icon-btn close-dialog" data-dialog="profile-dialog" aria-label="Close dialog">✕</button>
+      </div>
+
+      <form id="profile-form">
+        <!-- Avatar Preview & Picture Upload -->
+        <div class="profile-avatar-section">
+          <div class="profile-avatar-preview-wrap">
+            <span class="avatar u large" id="profile-avatar-preview">?</span>
+            <input type="file" id="profile-pic-input" accept="image/*" hidden>
+            <button type="button" class="profile-upload-trigger" id="profile-upload-trigger" title="Upload profile picture">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+              <span>Change Photo</span>
+            </button>
+          </div>
+          <button type="button" class="btn-text danger-text" id="profile-remove-pic-btn" hidden>Remove photo</button>
+        </div>
+
+        <div class="field">
+          <label for="profile-name">Display Name</label>
+          <div class="input-wrap">
+            <svg class="input-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            <input type="text" id="profile-name" required minlength="2" maxlength="50">
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Avatar Color Palette</label>
+          <div class="avatar-palette" id="avatar-palette"></div>
+        </div>
+
+        <div class="field">
+          <label for="profile-password">Change Password (optional)</label>
+          <div class="input-wrap">
+            <svg class="input-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            <input type="password" id="profile-password" placeholder="Leave blank to keep current" minlength="6">
+          </div>
+        </div>
+
+        <p class="field-error" id="profile-error"></p>
+
+        <div class="dialog-actions">
+          <button type="button" class="ghost close-dialog" data-dialog="profile-dialog">Cancel</button>
+          <button type="submit" class="primary" id="profile-save-btn">Save Changes</button>
+        </div>
+      </form>
     </div>
   </dialog>
 

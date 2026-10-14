@@ -39,10 +39,16 @@
     chatList: $('chat-list'),
     friendList: $('friend-list'),
     addFriendBtn: $('add-friend-btn'),
+    tabMyFriends: $('tab-my-friends'),
+    tabFriendRequests: $('tab-friend-requests'),
+    requestsBadge: $('requests-badge'),
+    requestsList: $('requests-list'),
 
+    meInfo: $('me-info'),
     meAvatar: $('me-avatar'),
     meName: $('me-name'),
     mePhone: $('me-phone'),
+    editProfileBtn: $('edit-profile-btn'),
     notifBtn: $('notif-btn'),
     themeBtn: $('theme-btn'),
     iconMoon: $('icon-moon'),
@@ -54,6 +60,7 @@
     convTitle: $('conv-title'),
     convSub: $('conv-sub'),
     manageGroupBtn: $('manage-group-btn'),
+    deleteConvBtn: $('delete-conv-btn'),
 
     banner: $('banner'),
     log: $('log'),
@@ -69,6 +76,11 @@
     input: $('input'),
     send: $('send'),
     attachBtn: $('attach-btn'),
+    voiceBtn: $('voice-btn'),
+    voiceRecordBar: $('voice-record-bar'),
+    voiceRecordTimer: $('voice-record-timer'),
+    voiceCancelBtn: $('voice-cancel-btn'),
+    voiceSendBtn: $('voice-send-btn'),
     mediaInput: $('media-input'),
     mediaPreviewBar: $('media-preview-bar'),
     mediaThumb: $('media-thumb'),
@@ -101,6 +113,21 @@
     addMemberError: $('add-member-error'),
     membersList: $('members-list'),
 
+    deleteConvDialog: $('delete-conv-dialog'),
+    confirmDeleteConvBtn: $('confirm-delete-conv-btn'),
+
+    profileDialog: $('profile-dialog'),
+    profileForm: $('profile-form'),
+    profileAvatarPreview: $('profile-avatar-preview'),
+    profilePicInput: $('profile-pic-input'),
+    profileUploadTrigger: $('profile-upload-trigger'),
+    profileRemovePicBtn: $('profile-remove-pic-btn'),
+    profileName: $('profile-name'),
+    avatarPalette: $('avatar-palette'),
+    profilePassword: $('profile-password'),
+    profileError: $('profile-error'),
+    profileSaveBtn: $('profile-save-btn'),
+
     lightboxDialog: $('lightbox-dialog'),
     lightboxImg: $('lightbox-img'),
     lightboxClose: $('lightbox-close'),
@@ -127,6 +154,7 @@
     user: null,
     conversations: [],
     friends: [],
+    friendRequests: [],
     activeConversationId: null,
     selectedFile: null,
     typers: new Map(),
@@ -165,6 +193,37 @@
       osc.stop(ctx.currentTime + 0.35);
     } catch (e) {
       /* AudioContext not allowed or not supported */
+    }
+  }
+
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function renderAvatar(elem, name, colorIndex, avatarUrl, isOnline) {
+    if (!elem) return;
+    elem.replaceChildren();
+    if (avatarUrl) {
+      elem.className = `avatar u ${isOnline ? 'online' : ''}`;
+      const img = document.createElement('img');
+      img.className = 'avatar-img';
+      img.src = avatarUrl;
+      img.alt = name || 'Avatar';
+      img.onerror = () => {
+        elem.replaceChildren();
+        elem.className = `avatar u c-${(colorIndex !== undefined ? colorIndex : 0) % 10} ${isOnline ? 'online' : ''}`;
+        elem.textContent = (name || '?').charAt(0).toUpperCase();
+      };
+      elem.appendChild(img);
+    } else {
+      elem.className = `avatar u c-${(colorIndex !== undefined ? colorIndex : 0) % 10} ${isOnline ? 'online' : ''}`;
+      elem.textContent = (name || '?').charAt(0).toUpperCase();
     }
   }
 
@@ -224,7 +283,10 @@
     return fetch(`${BASE}${endpoint}`, options).then(async (res) => {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(data.error || 'Request failed');
+        const err = new Error(data.error || 'Request failed');
+        err.status = res.status;
+        err.data = data;
+        throw err;
       }
       return data;
     });
@@ -324,14 +386,14 @@
 
     el.meName.textContent = state.user.name;
     el.mePhone.textContent = state.user.phone;
-    el.meAvatar.textContent = state.user.name[0].toUpperCase();
-    el.meAvatar.className = `avatar c-${state.user.avatar_color || 0}`;
+    renderAvatar(el.meAvatar, state.user.name, state.user.avatar_color, state.user.avatar_url);
 
     el.navAdmin.hidden = !state.user.is_admin;
 
     initSocket();
     loadConversations();
     loadFriends();
+    loadFriendRequests();
     hideLoader();
 
     if (window.innerWidth <= 768 && !state.activeConversationId) {
@@ -388,6 +450,53 @@
       }
     });
 
+    socket.on('user_profile_updated', ({ userId, name, avatarColor, avatarUrl }) => {
+      if (state.user && state.user.id === userId) {
+        state.user.name = name;
+        state.user.avatar_color = avatarColor;
+        state.user.avatar_url = avatarUrl;
+        el.meName.textContent = name;
+        renderAvatar(el.meAvatar, name, avatarColor, avatarUrl);
+      }
+      for (const conv of state.conversations) {
+        if (conv.otherUserId === userId) {
+          conv.name = name;
+          conv.avatarColor = avatarColor;
+          conv.avatarUrl = avatarUrl;
+        }
+      }
+      for (const f of state.friends) {
+        if (f.id === userId) {
+          f.name = name;
+          f.avatarColor = avatarColor;
+          f.avatarUrl = avatarUrl;
+        }
+      }
+      renderConversations();
+      renderFriends();
+      if (state.activeConversationId) {
+        const active = state.conversations.find((c) => c.id === state.activeConversationId);
+        if (active && active.otherUserId === userId) {
+          el.convTitle.textContent = name;
+          renderAvatar(el.convAvatar, name, avatarColor, avatarUrl, active.isOnline);
+        }
+      }
+    });
+
+    socket.on('friend_request_received', ({ sender }) => {
+      playChime();
+      toast(`Friend request received from ${sender.name}!`);
+      loadFriendRequests();
+    });
+
+    socket.on('friend_request_accepted', ({ friend }) => {
+      playChime();
+      toast(`${friend.name} accepted your friend request!`);
+      loadFriends();
+      loadConversations();
+      loadFriendRequests();
+    });
+
     socket.on('message', (msg) => {
       const isCurrent = state.activeConversationId === msg.conversationId;
       if (isCurrent) {
@@ -404,13 +513,18 @@
           ts: msg.ts,
         };
         renderConversations();
+      } else {
+        // May have unhidden a previously deleted/cleared conversation
+        loadConversations();
       }
 
       // Audio & Desktop notification if from someone else
       if (msg.senderId !== state.user.id) {
         playChime();
         const title = conv ? (conv.type === 'group' ? `${conv.name} (${msg.senderName})` : msg.senderName) : msg.senderName;
-        const bodyText = msg.mediaType ? (msg.mediaType === 'image' ? '📷 Sent a photo' : '🎥 Sent a video') : msg.text;
+        const bodyText = msg.mediaType
+          ? (msg.mediaType === 'image' ? '📷 Sent a photo' : (msg.mediaType === 'audio' ? '🎤 Voice message' : '🎥 Sent a video'))
+          : msg.text;
         if (document.hidden || !isCurrent) {
           sendBrowserNotification(title, bodyText, msg.conversationId);
         }
@@ -507,8 +621,12 @@
       li.onclick = () => switchConversation(conv.id);
 
       const avatar = document.createElement('span');
-      avatar.className = `avatar c-${conv.avatarColor || 0} ${conv.isOnline ? 'online' : ''}`;
-      avatar.textContent = conv.type === 'group' ? '👥' : (conv.name[0] || '?').toUpperCase();
+      if (conv.type === 'group') {
+        avatar.className = `avatar c-${conv.avatarColor || 0}`;
+        avatar.textContent = '👥';
+      } else {
+        renderAvatar(avatar, conv.name, conv.avatarColor, conv.avatarUrl, conv.isOnline);
+      }
 
       const textDiv = document.createElement('div');
       textDiv.className = 'chat-item-text';
@@ -543,7 +661,7 @@
   async function switchConversation(convId) {
     state.activeConversationId = convId;
     closeRail();
-    updateMenuButton(true);
+    updateMenuButton();
     state.typers.clear();
     renderTyping();
 
@@ -554,20 +672,21 @@
 
     // Setup Header
     el.convTitle.textContent = conv.name;
-    el.convAvatar.textContent = conv.type === 'group' ? '👥' : (conv.name[0] || '?').toUpperCase();
-    el.convAvatar.className = `avatar c-${conv.avatarColor || 0} ${conv.isOnline ? 'online' : ''}`;
-
     if (conv.type === 'group') {
+      el.convAvatar.className = `avatar c-${conv.avatarColor || 0}`;
+      el.convAvatar.textContent = '👥';
       el.convSub.textContent = `${conv.memberCount} members`;
       el.manageGroupBtn.hidden = false;
     } else {
+      renderAvatar(el.convAvatar, conv.name, conv.avatarColor, conv.avatarUrl, conv.isOnline);
       el.convSub.textContent = `${conv.phone} • ${conv.isOnline ? 'Online' : 'Offline'}`;
       el.manageGroupBtn.hidden = true;
     }
+    el.deleteConvBtn.hidden = false;
 
     el.input.disabled = false;
     el.send.disabled = false;
-    el.input.placeholder = `Message ${conv.name}…`;
+    el.input.placeholder = `Message ${conv.name}… (Enter to send)`;
 
     // Join room on socket
     if (socket) {
@@ -620,11 +739,11 @@
     // Avatar for other user
     if (!isOwn) {
       const avatar = document.createElement('span');
-      avatar.className = 'avatar';
       avatar.style.width = '30px';
       avatar.style.height = '30px';
+      avatar.style.minWidth = '30px';
       avatar.style.fontSize = '0.78rem';
-      avatar.textContent = (msg.senderName[0] || '?').toUpperCase();
+      renderAvatar(avatar, msg.senderName, 0, null);
       li.appendChild(avatar);
     }
 
@@ -657,7 +776,7 @@
       bubble.appendChild(p);
     }
 
-    // Media (Photo or Video)
+    // Media (Photo, Video, or Audio)
     if (msg.mediaUrl) {
       const mediaDiv = document.createElement('div');
       mediaDiv.className = 'msg-media';
@@ -669,6 +788,13 @@
         img.loading = 'lazy';
         img.onclick = () => openLightbox(msg.mediaUrl);
         mediaDiv.appendChild(img);
+      } else if (msg.mediaType === 'audio') {
+        const audio = document.createElement('audio');
+        audio.src = msg.mediaUrl;
+        audio.controls = true;
+        audio.preload = 'metadata';
+        mediaDiv.className = 'msg-media msg-audio';
+        mediaDiv.appendChild(audio);
       } else if (msg.mediaType === 'video') {
         const video = document.createElement('video');
         video.src = msg.mediaUrl;
@@ -830,6 +956,10 @@
         mediaUrl,
         mediaType,
         mediaName,
+      }, (ack) => {
+        if (ack && !ack.ok) {
+          toast(ack.error || 'Failed to send message');
+        }
       });
 
       el.input.value = '';
@@ -842,6 +972,20 @@
     }
   };
 
+  // Enter to send message, Shift+Enter for newline
+  el.input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (!el.send.disabled) {
+        if (typeof el.composer.requestSubmit === 'function') {
+          el.composer.requestSubmit();
+        } else {
+          el.composer.dispatchEvent(new Event('submit', { cancelable: true }));
+        }
+      }
+    }
+  });
+
   // Typing indicator broadcast
   let typingTimer = null;
   el.input.oninput = () => {
@@ -852,6 +996,123 @@
       socket.emit('typing', { conversationId: state.activeConversationId, typing: false });
     }, 2000);
   };
+
+  /* ------------------------------------------------------------- voice messages */
+  let mediaRecorder = null;
+  let voiceChunks = [];
+  let voiceTimerInterval = null;
+  let voiceSeconds = 0;
+
+  async function startVoiceRecording() {
+    if (!state.activeConversationId) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      voiceChunks = [];
+      voiceSeconds = 0;
+      el.voiceRecordTimer.textContent = '0:00';
+      el.voiceRecordBar.hidden = false;
+
+      let options = {};
+      if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        options = { mimeType: 'audio/webm;codecs=opus' };
+      } else if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/mp4')) {
+        options = { mimeType: 'audio/mp4' };
+      }
+
+      mediaRecorder = new MediaRecorder(stream, options);
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) voiceChunks.push(e.data);
+      };
+
+      mediaRecorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        clearInterval(voiceTimerInterval);
+      };
+
+      mediaRecorder.start(250);
+
+      voiceTimerInterval = setInterval(() => {
+        voiceSeconds++;
+        const mins = Math.floor(voiceSeconds / 60);
+        const secs = voiceSeconds % 60;
+        el.voiceRecordTimer.textContent = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+      }, 1000);
+    } catch (err) {
+      toast('Microphone access denied or not supported.');
+      el.voiceRecordBar.hidden = true;
+    }
+  }
+
+  function stopVoiceRecording(discard = false) {
+    if (!mediaRecorder) return;
+    if (discard) {
+      mediaRecorder.ondataavailable = null;
+      mediaRecorder.stop();
+      mediaRecorder = null;
+      voiceChunks = [];
+      clearInterval(voiceTimerInterval);
+      el.voiceRecordBar.hidden = true;
+    } else {
+      const rec = mediaRecorder;
+      rec.onstop = async () => {
+        clearInterval(voiceTimerInterval);
+        el.voiceRecordBar.hidden = true;
+        if (!voiceChunks.length) return;
+        const mimeType = rec.mimeType || 'audio/webm';
+        const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
+        const blob = new Blob(voiceChunks, { type: mimeType });
+        const file = new File([blob], `voice-${Date.now()}.${ext}`, { type: mimeType });
+        mediaRecorder = null;
+        voiceChunks = [];
+        await sendVoiceFile(file);
+      };
+      rec.stop();
+    }
+  }
+
+  async function sendVoiceFile(file) {
+    if (!state.activeConversationId) return;
+    toast('Uploading voice note…');
+    try {
+      const fd = new FormData();
+      fd.append('media', file);
+      const res = await fetch(`${BASE}/api/upload`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${state.token}` },
+        body: fd,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to upload voice note');
+
+      socket.emit('message', {
+        conversationId: state.activeConversationId,
+        text: '',
+        mediaUrl: data.url,
+        mediaType: 'audio',
+        mediaName: 'Voice note',
+      });
+    } catch (err) {
+      toast(err.message);
+    }
+  }
+
+  if (el.voiceBtn) {
+    el.voiceBtn.onclick = () => {
+      if (el.voiceRecordBar.hidden) {
+        startVoiceRecording();
+      } else {
+        stopVoiceRecording(false);
+      }
+    };
+  }
+
+  if (el.voiceCancelBtn) {
+    el.voiceCancelBtn.onclick = () => stopVoiceRecording(true);
+  }
+
+  if (el.voiceSendBtn) {
+    el.voiceSendBtn.onclick = () => stopVoiceRecording(false);
+  }
 
   /* ------------------------------------------------------------- emoji picker */
   const EMOJIS = [
@@ -887,7 +1148,7 @@
     }
   });
 
-  /* ------------------------------------------------------------- friends */
+  /* ------------------------------------------------------------- friends & requests */
   async function loadFriends() {
     try {
       const data = await api('/api/friends');
@@ -924,8 +1185,7 @@
       li.onclick = () => startDirectChatWithPhone(f.phone);
 
       const avatar = document.createElement('span');
-      avatar.className = `avatar c-${f.avatarColor || 0} ${f.isOnline ? 'online' : ''}`;
-      avatar.textContent = (f.name[0] || '?').toUpperCase();
+      renderAvatar(avatar, f.name, f.avatarColor, f.avatarUrl, f.isOnline);
 
       const textDiv = document.createElement('div');
       textDiv.className = 'friend-item-text';
@@ -949,6 +1209,145 @@
     }
   }
 
+  if (el.tabMyFriends) {
+    el.tabMyFriends.onclick = () => {
+      el.tabMyFriends.classList.add('active');
+      el.tabFriendRequests.classList.remove('active');
+      el.friendList.hidden = false;
+      el.requestsList.hidden = true;
+    };
+  }
+
+  if (el.tabFriendRequests) {
+    el.tabFriendRequests.onclick = () => {
+      el.tabFriendRequests.classList.add('active');
+      el.tabMyFriends.classList.remove('active');
+      el.friendList.hidden = true;
+      el.requestsList.hidden = false;
+      loadFriendRequests();
+    };
+  }
+
+  async function loadFriendRequests() {
+    try {
+      const data = await api('/api/friends/requests');
+      state.friendRequests = data.requests || [];
+      renderFriendRequests();
+      if (el.requestsBadge) {
+        if (state.friendRequests.length > 0) {
+          el.requestsBadge.textContent = state.friendRequests.length;
+          el.requestsBadge.hidden = false;
+        } else {
+          el.requestsBadge.hidden = true;
+        }
+      }
+    } catch (err) {
+      console.error('loadFriendRequests error:', err);
+    }
+  }
+
+  function renderFriendRequests() {
+    if (!el.requestsList) return;
+    el.requestsList.replaceChildren();
+
+    if (!state.friendRequests.length) {
+      const empty = document.createElement('li');
+      empty.className = 'panel-title';
+      empty.style.padding = '1.25rem 0.75rem';
+      empty.style.textAlign = 'center';
+      empty.textContent = 'No pending friend requests';
+      el.requestsList.appendChild(empty);
+      return;
+    }
+
+    for (const req of state.friendRequests) {
+      const li = document.createElement('li');
+      li.className = 'req-item';
+
+      const userDiv = document.createElement('div');
+      userDiv.className = 'req-user-info';
+
+      const avatar = document.createElement('span');
+      avatar.style.width = '36px';
+      avatar.style.height = '36px';
+      avatar.style.minWidth = '36px';
+      renderAvatar(avatar, req.name, req.avatarColor, req.avatarUrl);
+
+      const textDiv = document.createElement('div');
+      textDiv.style.minWidth = '0';
+      textDiv.style.flex = '1';
+
+      const name = document.createElement('div');
+      name.className = 'req-name';
+      name.textContent = req.name;
+
+      const phone = document.createElement('div');
+      phone.className = 'req-phone';
+      phone.textContent = req.phone;
+
+      textDiv.append(name, phone);
+      userDiv.append(avatar, textDiv);
+
+      const actionsDiv = document.createElement('div');
+      actionsDiv.className = 'req-actions';
+
+      const acceptBtn = document.createElement('button');
+      acceptBtn.type = 'button';
+      acceptBtn.className = 'req-btn accept';
+      acceptBtn.textContent = 'Accept';
+      acceptBtn.onclick = () => acceptFriendRequest(req.id);
+
+      const declineBtn = document.createElement('button');
+      declineBtn.type = 'button';
+      declineBtn.className = 'req-btn decline';
+      declineBtn.textContent = 'Decline';
+      declineBtn.onclick = () => declineFriendRequest(req.id);
+
+      actionsDiv.append(acceptBtn, declineBtn);
+      li.append(userDiv, actionsDiv);
+      el.requestsList.appendChild(li);
+    }
+  }
+
+  async function acceptFriendRequest(reqId) {
+    try {
+      const data = await api(`/api/friends/requests/${reqId}/accept`, { method: 'POST' });
+      toast(`You and ${data.friend ? data.friend.name : 'your friend'} are now friends!`);
+      loadFriendRequests();
+      loadFriends();
+      loadConversations();
+    } catch (err) {
+      toast(err.message);
+    }
+  }
+
+  async function declineFriendRequest(reqId) {
+    try {
+      await api(`/api/friends/requests/${reqId}/decline`, { method: 'POST' });
+      toast('Friend request declined');
+      loadFriendRequests();
+    } catch (err) {
+      toast(err.message);
+    }
+  }
+
+  async function sendFriendRequest(phone) {
+    try {
+      const data = await api('/api/friends/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone }),
+      });
+      toast(data.message || 'Friend request sent!');
+      loadFriends();
+      loadFriendRequests();
+      return true;
+    } catch (err) {
+      toast(err.message);
+      return false;
+    }
+  }
+
   async function startDirectChatWithPhone(phone) {
     try {
       const data = await api('/api/conversations/direct', {
@@ -959,7 +1358,12 @@
       await loadConversations();
       switchConversation(data.conversation.id);
     } catch (err) {
-      toast(err.message);
+      if (err.data && err.data.requiresFriendRequest) {
+        toast('Friend request required to talk.');
+        sendFriendRequest(phone);
+      } else {
+        toast(err.message);
+      }
     }
   }
 
@@ -1000,7 +1404,7 @@
 
   el.dmForm.onsubmit = async (e) => {
     e.preventDefault();
-    el.dmError.textContent = '';
+    el.dmError.replaceChildren();
     try {
       const phone = el.dmPhone.value.trim();
       const data = await api('/api/conversations/direct', {
@@ -1013,7 +1417,25 @@
       await loadConversations();
       switchConversation(data.conversation.id);
     } catch (err) {
-      el.dmError.textContent = err.message;
+      if (err.data && err.data.requiresFriendRequest) {
+        const span = document.createElement('span');
+        span.textContent = `${err.message} `;
+        const reqBtn = document.createElement('button');
+        reqBtn.type = 'button';
+        reqBtn.className = 'btn-text';
+        reqBtn.style.color = 'var(--accent)';
+        reqBtn.style.fontWeight = '700';
+        reqBtn.textContent = 'Send Friend Request';
+        reqBtn.onclick = async () => {
+          reqBtn.disabled = true;
+          reqBtn.textContent = 'Sending…';
+          const ok = await sendFriendRequest(el.dmPhone.value.trim());
+          if (ok) el.newChatDialog.close();
+        };
+        el.dmError.append(span, reqBtn);
+      } else {
+        el.dmError.textContent = err.message;
+      }
     }
   };
 
@@ -1053,19 +1475,183 @@
     el.friendError.textContent = '';
     try {
       const phone = el.friendPhone.value.trim();
-      await api('/api/friends/add', {
+      const data = await api('/api/friends/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone }),
       });
       el.friendPhone.value = '';
       el.addFriendDialog.close();
-      toast('Friend added!');
+      toast(data.message || 'Friend request sent!');
       loadFriends();
+      loadFriendRequests();
     } catch (err) {
       el.friendError.textContent = err.message;
     }
   };
+
+  /* ------------------------------------------------------------- delete conversation ("delete for me") */
+  if (el.deleteConvBtn) {
+    el.deleteConvBtn.onclick = () => {
+      if (!state.activeConversationId) return;
+      el.deleteConvDialog.showModal();
+    };
+  }
+
+  if (el.confirmDeleteConvBtn) {
+    el.confirmDeleteConvBtn.onclick = async () => {
+      if (!state.activeConversationId) return;
+      const convId = state.activeConversationId;
+      try {
+        await api(`/api/conversations/${convId}`, { method: 'DELETE' });
+        toast('Conversation deleted for you.');
+        el.deleteConvDialog.close();
+
+        state.activeConversationId = null;
+        el.deleteConvBtn.hidden = true;
+        el.manageGroupBtn.hidden = true;
+        el.convTitle.textContent = 'Select a conversation';
+        el.convSub.textContent = 'or start a new chat';
+        renderAvatar(el.convAvatar, '#', 0, null);
+        el.input.disabled = true;
+        el.send.disabled = true;
+        el.messages.replaceChildren();
+        el.emptyState.hidden = false;
+        el.emptyTitle.textContent = 'Conversation deleted';
+        el.emptyText.textContent = 'Select a chat from the sidebar or click + to start messaging.';
+
+        await loadConversations();
+      } catch (err) {
+        toast(err.message);
+      }
+    };
+  }
+
+  /* ------------------------------------------------------------- profile edit modal */
+  let profileSelectedColor = 0;
+  let profileAvatarUrl = null;
+
+  function openProfileDialog() {
+    if (!state.user) return;
+    profileSelectedColor = state.user.avatar_color || 0;
+    profileAvatarUrl = state.user.avatar_url || null;
+
+    el.profileName.value = state.user.name || '';
+    el.profilePassword.value = '';
+    el.profileError.textContent = '';
+
+    renderProfileAvatarPreview();
+    renderAvatarPalette();
+    el.profileDialog.showModal();
+  }
+
+  function renderProfileAvatarPreview() {
+    renderAvatar(el.profileAvatarPreview, el.profileName.value || state.user.name, profileSelectedColor, profileAvatarUrl);
+    if (el.profileRemovePicBtn) {
+      el.profileRemovePicBtn.hidden = !profileAvatarUrl;
+    }
+  }
+
+  function renderAvatarPalette() {
+    el.avatarPalette.replaceChildren();
+    for (let i = 0; i < 10; i++) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `palette-color-btn avatar c-${i} ${profileSelectedColor === i ? 'selected' : ''}`;
+      btn.textContent = (el.profileName.value || state.user.name || '?').charAt(0).toUpperCase();
+      btn.onclick = () => {
+        profileSelectedColor = i;
+        renderAvatarPalette();
+        renderProfileAvatarPreview();
+      };
+      el.avatarPalette.appendChild(btn);
+    }
+  }
+
+  if (el.meInfo) {
+    el.meInfo.onclick = (e) => {
+      if (e.target.closest('#logout-btn') || e.target.closest('#notif-btn') || e.target.closest('#theme-btn')) return;
+      openProfileDialog();
+    };
+  }
+
+  if (el.editProfileBtn) {
+    el.editProfileBtn.onclick = (e) => {
+      e.stopPropagation();
+      openProfileDialog();
+    };
+  }
+
+  if (el.profileUploadTrigger) {
+    el.profileUploadTrigger.onclick = () => el.profilePicInput.click();
+  }
+
+  if (el.profilePicInput) {
+    el.profilePicInput.onchange = async () => {
+      const file = el.profilePicInput.files && el.profilePicInput.files[0];
+      if (!file) return;
+      toast('Uploading profile photo…');
+      try {
+        const fd = new FormData();
+        fd.append('media', file);
+        const res = await fetch(`${BASE}/api/upload`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${state.token}` },
+          body: fd,
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to upload photo');
+        profileAvatarUrl = data.url;
+        renderProfileAvatarPreview();
+        toast('Photo uploaded! Click Save Changes to apply.');
+      } catch (err) {
+        toast(err.message);
+      }
+    };
+  }
+
+  if (el.profileRemovePicBtn) {
+    el.profileRemovePicBtn.onclick = () => {
+      profileAvatarUrl = null;
+      renderProfileAvatarPreview();
+    };
+  }
+
+  if (el.profileForm) {
+    el.profileForm.onsubmit = async (e) => {
+      e.preventDefault();
+      el.profileError.textContent = '';
+      el.profileSaveBtn.disabled = true;
+
+      try {
+        const name = el.profileName.value.trim();
+        const password = el.profilePassword.value;
+        const payload = {
+          name,
+          avatarColor: profileSelectedColor,
+          avatarUrl: profileAvatarUrl,
+        };
+        if (password) payload.password = password;
+
+        const data = await api('/api/profile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        state.user = data.user;
+        el.meName.textContent = data.user.name;
+        renderAvatar(el.meAvatar, data.user.name, data.user.avatar_color, data.user.avatar_url);
+
+        el.profileDialog.close();
+        toast('Profile updated successfully!');
+      } catch (err) {
+        el.profileError.textContent = err.message;
+      } finally {
+        el.profileSaveBtn.disabled = false;
+      }
+    };
+  }
 
   // Group Members modal
   el.manageGroupBtn.onclick = async () => {
@@ -1299,27 +1885,21 @@
     el.app.classList.add('rail-open');
     el.scrim.hidden = false;
     el.menuBtn.setAttribute('aria-expanded', 'true');
-    updateMenuButton(false);
+    updateMenuButton();
   }
 
   function closeRail() {
     el.app.classList.remove('rail-open');
     el.scrim.hidden = true;
     el.menuBtn.setAttribute('aria-expanded', 'false');
-    updateMenuButton(!!state.activeConversationId);
+    updateMenuButton();
   }
 
-  function updateMenuButton(hasActiveChat) {
+  function updateMenuButton() {
     if (!el.menuBtn) return;
-    if (window.innerWidth <= 768 && hasActiveChat) {
-      el.menuBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>';
-      el.menuBtn.setAttribute('title', 'Back to chats');
-      el.menuBtn.setAttribute('aria-label', 'Back to chats');
-    } else {
-      el.menuBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>';
-      el.menuBtn.setAttribute('title', 'Open navigation');
-      el.menuBtn.setAttribute('aria-label', 'Open navigation');
-    }
+    el.menuBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>';
+    el.menuBtn.setAttribute('title', 'Toggle navigation');
+    el.menuBtn.setAttribute('aria-label', 'Toggle navigation');
   }
 
   el.menuBtn.onclick = () => {
@@ -1332,7 +1912,7 @@
   el.scrim.onclick = closeRail;
 
   window.addEventListener('resize', () => {
-    updateMenuButton(!!state.activeConversationId);
+    updateMenuButton();
   });
 
   el.log.addEventListener('click', (e) => {

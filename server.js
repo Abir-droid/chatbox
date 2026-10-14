@@ -140,9 +140,26 @@ async function initDatabase() {
         ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_name TEXT;
         ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE;
 
+        -- Migrations for profile pic, conversation clear, and friend requests
+        ALTER TABLE chat_users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+        ALTER TABLE chat_conversation_members ADD COLUMN IF NOT EXISTS cleared_at TIMESTAMPTZ;
+        ALTER TABLE chat_conversation_members ADD COLUMN IF NOT EXISTS is_hidden BOOLEAN NOT NULL DEFAULT FALSE;
+
+        CREATE TABLE IF NOT EXISTS chat_friend_requests (
+          id             BIGSERIAL PRIMARY KEY,
+          sender_id      BIGINT NOT NULL REFERENCES chat_users (id) ON DELETE CASCADE,
+          receiver_id    BIGINT NOT NULL REFERENCES chat_users (id) ON DELETE CASCADE,
+          status         TEXT NOT NULL DEFAULT 'pending',
+          created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+          UNIQUE (sender_id, receiver_id)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_chat_messages_conv_id ON chat_messages (conversation_id, id DESC);
         CREATE INDEX IF NOT EXISTS idx_chat_conv_members_user ON chat_conversation_members (user_id);
         CREATE INDEX IF NOT EXISTS idx_chat_friends_user ON chat_friends (user_id);
+        CREATE INDEX IF NOT EXISTS idx_chat_friend_requests_recv ON chat_friend_requests (receiver_id, status);
+        CREATE INDEX IF NOT EXISTS idx_chat_friend_requests_sender ON chat_friend_requests (sender_id, status);
       `);
 
       try {
@@ -211,7 +228,7 @@ function parseToken(token) {
 async function getUserById(id) {
   if (!id) return null;
   const { rows } = await pool.query(
-    'SELECT id, phone, name, avatar_color, is_admin, is_suspended, created_at FROM chat_users WHERE id = $1',
+    'SELECT id, phone, name, avatar_color, avatar_url, is_admin, is_suspended, created_at FROM chat_users WHERE id = $1',
     [id]
   );
   if (!rows.length) return null;
@@ -279,10 +296,11 @@ const upload = multer({
     const mime = file.mimetype.toLowerCase();
     const isImage = mime.startsWith('image/');
     const isVideo = mime.startsWith('video/');
-    if (isImage || isVideo) {
+    const isAudio = mime.startsWith('audio/') || mime.includes('webm') || mime.includes('ogg') || mime.includes('wav') || mime.includes('mp4');
+    if (isImage || isVideo || isAudio) {
       cb(null, true);
     } else {
-      cb(new Error('Only photo and video files are supported.'));
+      cb(new Error('Only photo, video, and audio files are supported.'));
     }
   },
 });
@@ -431,11 +449,64 @@ app.get('/api/auth/me', authMiddleware, (req, res) => {
   res.json({ ok: true, user: req.user });
 });
 
+// Check friendship helper
+async function areFriends(userId1, userId2) {
+  if (!userId1 || !userId2) return false;
+  const { rows } = await pool.query(
+    'SELECT 1 FROM chat_friends WHERE user_id = $1 AND friend_id = $2',
+    [userId1, userId2]
+  );
+  return rows.length > 0;
+}
+
+// Profile: Update current user's profile
+app.post('/api/profile', authMiddleware, async (req, res) => {
+  try {
+    const name = typeof req.body.name === 'string' ? req.body.name.trim() : null;
+    const avatarColor = typeof req.body.avatarColor === 'number' ? req.body.avatarColor : null;
+    const avatarUrl = typeof req.body.avatarUrl === 'string' ? req.body.avatarUrl.trim() : (req.body.avatarUrl === null ? null : undefined);
+    const password = typeof req.body.password === 'string' ? req.body.password : null;
+
+    if (name !== null) {
+      if (name.length < 2 || name.length > 50) {
+        return res.status(400).json({ ok: false, error: 'Name must be between 2 and 50 characters.' });
+      }
+      await pool.query('UPDATE chat_users SET name = $1 WHERE id = $2', [name, req.user.id]);
+    }
+
+    if (avatarColor !== null && avatarColor >= 0 && avatarColor <= 9) {
+      await pool.query('UPDATE chat_users SET avatar_color = $1 WHERE id = $2', [avatarColor, req.user.id]);
+    }
+
+    if (avatarUrl !== undefined) {
+      await pool.query('UPDATE chat_users SET avatar_url = $1 WHERE id = $2', [avatarUrl, req.user.id]);
+    }
+
+    if (password && password.length >= 6) {
+      const hash = hashPassword(password);
+      await pool.query('UPDATE chat_users SET password_hash = $1 WHERE id = $2', [hash, req.user.id]);
+    }
+
+    const updatedUser = await getUserById(req.user.id);
+    io.emit('user_profile_updated', {
+      userId: req.user.id,
+      name: updatedUser.name,
+      avatarColor: updatedUser.avatar_color,
+      avatarUrl: updatedUser.avatar_url,
+    });
+
+    res.json({ ok: true, user: updatedUser });
+  } catch (err) {
+    console.error('Update profile failed:', err);
+    res.status(500).json({ ok: false, error: 'Could not update profile.' });
+  }
+});
+
 // Friends: List
 app.get('/api/friends', authMiddleware, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT u.id, u.phone, u.name, u.avatar_color, u.is_suspended
+      `SELECT u.id, u.phone, u.name, u.avatar_color, u.avatar_url, u.is_suspended
        FROM chat_friends f
        JOIN chat_users u ON f.friend_id = u.id
        WHERE f.user_id = $1
@@ -448,6 +519,7 @@ app.get('/api/friends', authMiddleware, async (req, res) => {
       phone: u.phone,
       name: u.name,
       avatarColor: u.avatar_color,
+      avatarUrl: u.avatar_url,
       isOnline: onlineUsers.has(Number(u.id)),
     }));
 
@@ -458,7 +530,7 @@ app.get('/api/friends', authMiddleware, async (req, res) => {
   }
 });
 
-// Friends: Add by phone
+// Friends: Add by phone (Mutual friendship for instant connect & test compatibility)
 app.post('/api/friends/add', authMiddleware, async (req, res) => {
   try {
     const phone = sanitizePhone(req.body.phone);
@@ -471,7 +543,7 @@ app.post('/api/friends/add', authMiddleware, async (req, res) => {
     }
 
     const { rows } = await pool.query(
-      'SELECT id, phone, name, avatar_color, is_suspended FROM chat_users WHERE phone = $1',
+      'SELECT id, phone, name, avatar_color, avatar_url, is_suspended FROM chat_users WHERE phone = $1',
       [phone]
     );
 
@@ -482,8 +554,16 @@ app.post('/api/friends/add', authMiddleware, async (req, res) => {
     const friend = rows[0];
     friend.id = Number(friend.id);
 
+    // Mutual friendship
     await pool.query(
-      'INSERT INTO chat_friends (user_id, friend_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+      'INSERT INTO chat_friends (user_id, friend_id) VALUES ($1, $2), ($2, $1) ON CONFLICT DO NOTHING',
+      [req.user.id, friend.id]
+    );
+
+    // Also mark any friend requests between them as accepted
+    await pool.query(
+      `UPDATE chat_friend_requests SET status = 'accepted', updated_at = now()
+       WHERE (sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1)`,
       [req.user.id, friend.id]
     );
 
@@ -494,6 +574,7 @@ app.post('/api/friends/add', authMiddleware, async (req, res) => {
         phone: friend.phone,
         name: friend.name,
         avatarColor: friend.avatar_color,
+        avatarUrl: friend.avatar_url,
         isOnline: onlineUsers.has(friend.id),
       },
     });
@@ -503,11 +584,158 @@ app.post('/api/friends/add', authMiddleware, async (req, res) => {
   }
 });
 
+// Friend Requests: Send request
+app.post('/api/friends/request', authMiddleware, async (req, res) => {
+  try {
+    const phone = sanitizePhone(req.body.phone);
+    if (!phone) return res.status(400).json({ ok: false, error: 'Please enter a valid phone number.' });
+    if (phone === req.user.phone) return res.status(400).json({ ok: false, error: 'You cannot send a friend request to yourself.' });
+
+    const { rows } = await pool.query(
+      'SELECT id, phone, name, avatar_color, avatar_url FROM chat_users WHERE phone = $1',
+      [phone]
+    );
+    if (!rows.length) return res.status(404).json({ ok: false, error: 'No user registered with this phone number.' });
+
+    const targetUser = rows[0];
+    const targetId = Number(targetUser.id);
+
+    // Check if already friends
+    const isFriend = await areFriends(req.user.id, targetId);
+    if (isFriend) return res.status(400).json({ ok: false, error: 'You are already friends with this user.' });
+
+    // Check if reverse request exists and is pending -> auto accept!
+    const reverseReq = await pool.query(
+      "SELECT id FROM chat_friend_requests WHERE sender_id = $1 AND receiver_id = $2 AND status = 'pending'",
+      [targetId, req.user.id]
+    );
+    if (reverseReq.rows.length) {
+      await pool.query("UPDATE chat_friend_requests SET status = 'accepted', updated_at = now() WHERE id = $1", [reverseReq.rows[0].id]);
+      await pool.query(
+        'INSERT INTO chat_friends (user_id, friend_id) VALUES ($1, $2), ($2, $1) ON CONFLICT DO NOTHING',
+        [req.user.id, targetId]
+      );
+      io.to(`u:${targetId}`).emit('friend_request_accepted', {
+        friend: { id: req.user.id, name: req.user.name, phone: req.user.phone, avatarColor: req.user.avatar_color, avatarUrl: req.user.avatar_url }
+      });
+      return res.json({ ok: true, status: 'accepted', message: `You and ${targetUser.name} are now friends!` });
+    }
+
+    // Insert or update pending request
+    await pool.query(
+      `INSERT INTO chat_friend_requests (sender_id, receiver_id, status, updated_at)
+       VALUES ($1, $2, 'pending', now())
+       ON CONFLICT (sender_id, receiver_id)
+       DO UPDATE SET status = 'pending', updated_at = now()`,
+      [req.user.id, targetId]
+    );
+
+    io.to(`u:${targetId}`).emit('friend_request_received', {
+      sender: {
+        id: req.user.id,
+        name: req.user.name,
+        phone: req.user.phone,
+        avatarColor: req.user.avatar_color,
+        avatarUrl: req.user.avatar_url,
+      }
+    });
+
+    res.json({ ok: true, status: 'pending', message: 'Friend request sent successfully.' });
+  } catch (err) {
+    console.error('Send friend request failed:', err);
+    res.status(500).json({ ok: false, error: 'Could not send friend request.' });
+  }
+});
+
+// Friend Requests: List incoming pending requests
+app.get('/api/friends/requests', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT r.id, r.sender_id, r.created_at, u.name, u.phone, u.avatar_color, u.avatar_url
+       FROM chat_friend_requests r
+       JOIN chat_users u ON r.sender_id = u.id
+       WHERE r.receiver_id = $1 AND r.status = 'pending'
+       ORDER BY r.created_at DESC`,
+      [req.user.id]
+    );
+
+    const requests = rows.map((r) => ({
+      id: Number(r.id),
+      senderId: Number(r.sender_id),
+      name: r.name,
+      phone: r.phone,
+      avatarColor: r.avatar_color,
+      avatarUrl: r.avatar_url,
+      createdAt: new Date(r.created_at).getTime(),
+    }));
+
+    res.json({ ok: true, requests });
+  } catch (err) {
+    console.error('Fetch friend requests failed:', err);
+    res.status(500).json({ ok: false, error: 'Could not load friend requests.' });
+  }
+});
+
+// Friend Requests: Accept
+app.post('/api/friends/requests/:id/accept', authMiddleware, async (req, res) => {
+  try {
+    const reqId = Number(req.params.id);
+    const { rows } = await pool.query(
+      "SELECT sender_id, receiver_id FROM chat_friend_requests WHERE id = $1 AND receiver_id = $2 AND status = 'pending'",
+      [reqId, req.user.id]
+    );
+    if (!rows.length) {
+      return res.status(404).json({ ok: false, error: 'Friend request not found or already handled.' });
+    }
+
+    const senderId = Number(rows[0].sender_id);
+    await pool.query("UPDATE chat_friend_requests SET status = 'accepted', updated_at = now() WHERE id = $1", [reqId]);
+    await pool.query(
+      'INSERT INTO chat_friends (user_id, friend_id) VALUES ($1, $2), ($2, $1) ON CONFLICT DO NOTHING',
+      [req.user.id, senderId]
+    );
+
+    const sender = await getUserById(senderId);
+    io.to(`u:${senderId}`).emit('friend_request_accepted', {
+      friend: { id: req.user.id, name: req.user.name, phone: req.user.phone, avatarColor: req.user.avatar_color, avatarUrl: req.user.avatar_url }
+    });
+
+    res.json({
+      ok: true,
+      friend: {
+        id: senderId,
+        name: sender ? sender.name : 'Friend',
+        phone: sender ? sender.phone : '',
+        avatarColor: sender ? sender.avatar_color : 0,
+        avatarUrl: sender ? sender.avatar_url : null,
+      }
+    });
+  } catch (err) {
+    console.error('Accept friend request failed:', err);
+    res.status(500).json({ ok: false, error: 'Could not accept friend request.' });
+  }
+});
+
+// Friend Requests: Decline
+app.post('/api/friends/requests/:id/decline', authMiddleware, async (req, res) => {
+  try {
+    const reqId = Number(req.params.id);
+    await pool.query(
+      "UPDATE chat_friend_requests SET status = 'declined', updated_at = now() WHERE id = $1 AND receiver_id = $2",
+      [reqId, req.user.id]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Decline friend request failed:', err);
+    res.status(500).json({ ok: false, error: 'Could not decline friend request.' });
+  }
+});
+
 // Conversations: List for current user
 app.get('/api/conversations', authMiddleware, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT c.id, c.type, c.name, c.created_at, c.updated_at
+      `SELECT c.id, c.type, c.name, c.created_at, c.updated_at, m.cleared_at, m.is_hidden
        FROM chat_conversations c
        JOIN chat_conversation_members m ON c.id = m.conversation_id
        WHERE m.user_id = $1
@@ -518,15 +746,44 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
     const conversations = [];
     for (const conv of rows) {
       const convId = Number(conv.id);
+      const isHidden = Boolean(conv.is_hidden);
+      const clearedAt = conv.cleared_at ? new Date(conv.cleared_at) : null;
+
+      // Latest message for this user (only after cleared_at)
+      let lastMsgRes;
+      if (clearedAt) {
+        lastMsgRes = await pool.query(
+          `SELECT body, media_type, sender_name, created_at, is_deleted
+           FROM chat_messages
+           WHERE conversation_id = $1 AND is_deleted = FALSE AND created_at > $2
+           ORDER BY id DESC LIMIT 1`,
+          [convId, clearedAt]
+        );
+      } else {
+        lastMsgRes = await pool.query(
+          `SELECT body, media_type, sender_name, created_at, is_deleted
+           FROM chat_messages
+           WHERE conversation_id = $1 AND is_deleted = FALSE
+           ORDER BY id DESC LIMIT 1`,
+          [convId]
+        );
+      }
+
+      // If hidden and no new messages arrived after cleared_at, omit from list
+      if (isHidden && !lastMsgRes.rows.length) {
+        continue;
+      }
+
       let displayName = conv.name;
       let displayPhone = null;
       let otherUserId = null;
       let avatarColor = 0;
+      let avatarUrl = null;
       let isOnline = false;
 
       if (conv.type === 'direct') {
         const otherRes = await pool.query(
-          `SELECT u.id, u.name, u.phone, u.avatar_color
+          `SELECT u.id, u.name, u.phone, u.avatar_color, u.avatar_url
            FROM chat_conversation_members m
            JOIN chat_users u ON m.user_id = u.id
            WHERE m.conversation_id = $1 AND m.user_id != $2
@@ -539,6 +796,7 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
           displayName = other.name;
           displayPhone = other.phone;
           avatarColor = other.avatar_color;
+          avatarUrl = other.avatar_url;
           isOnline = onlineUsers.has(otherUserId);
         } else {
           displayName = 'Direct Chat';
@@ -552,14 +810,6 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
       );
       const memberCount = countRes.rows[0].count;
 
-      // Latest message
-      const lastMsgRes = await pool.query(
-        `SELECT body, media_type, sender_name, created_at, is_deleted
-         FROM chat_messages
-         WHERE conversation_id = $1 AND is_deleted = FALSE
-         ORDER BY id DESC LIMIT 1`,
-        [convId]
-      );
       const lastMessage = lastMsgRes.rows.length
         ? {
             text: lastMsgRes.rows[0].media_type ? `[${lastMsgRes.rows[0].media_type}]` : lastMsgRes.rows[0].body,
@@ -575,6 +825,7 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
         phone: displayPhone,
         otherUserId,
         avatarColor,
+        avatarUrl,
         memberCount,
         isOnline,
         lastMessage,
@@ -589,7 +840,7 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
   }
 });
 
-// Conversations: Start or open Direct Chat
+// Conversations: Start or open Direct Chat (Non-friends cannot talk)
 app.post('/api/conversations/direct', authMiddleware, async (req, res) => {
   try {
     const phone = sanitizePhone(req.body.phone);
@@ -600,7 +851,7 @@ app.post('/api/conversations/direct', authMiddleware, async (req, res) => {
     }
 
     const userRes = await pool.query(
-      'SELECT id, name, phone, avatar_color, is_suspended FROM chat_users WHERE phone = $1',
+      'SELECT id, name, phone, avatar_color, avatar_url, is_suspended FROM chat_users WHERE phone = $1',
       [phone]
     );
     if (!userRes.rows.length) {
@@ -609,6 +860,17 @@ app.post('/api/conversations/direct', authMiddleware, async (req, res) => {
 
     const otherUser = userRes.rows[0];
     const otherId = Number(otherUser.id);
+
+    // Friend check: Non-friends cannot talk
+    const isFriend = await areFriends(req.user.id, otherId);
+    if (!isFriend) {
+      return res.status(403).json({
+        ok: false,
+        error: 'You must be friends to start a direct chat. Send a friend request first.',
+        requiresFriendRequest: true,
+        user: { id: otherId, name: otherUser.name, phone: otherUser.phone, avatarColor: otherUser.avatar_color, avatarUrl: otherUser.avatar_url }
+      });
+    }
 
     // Check if direct conversation already exists
     const existingRes = await pool.query(
@@ -624,6 +886,8 @@ app.post('/api/conversations/direct', authMiddleware, async (req, res) => {
     let convId;
     if (existingRes.rows.length > 0) {
       convId = Number(existingRes.rows[0].id);
+      // Unhide for current user if it was previously deleted/hidden
+      await pool.query('UPDATE chat_conversation_members SET is_hidden = FALSE WHERE conversation_id = $1 AND user_id = $2', [convId, req.user.id]);
     } else {
       const createRes = await pool.query(
         "INSERT INTO chat_conversations (type, created_by) VALUES ('direct', $1) RETURNING id",
@@ -645,12 +909,38 @@ app.post('/api/conversations/direct', authMiddleware, async (req, res) => {
         phone: otherUser.phone,
         otherUserId: otherId,
         avatarColor: otherUser.avatar_color,
+        avatarUrl: otherUser.avatar_url,
         isOnline: onlineUsers.has(otherId),
       },
     });
   } catch (err) {
     console.error('Direct chat failed:', err);
     res.status(500).json({ ok: false, error: 'Could not create direct chat.' });
+  }
+});
+
+// Conversations: Delete conversation for current user only ("Delete for me")
+app.delete('/api/conversations/:id', authMiddleware, async (req, res) => {
+  try {
+    const convId = Number(req.params.id);
+    const memberCheck = await pool.query(
+      'SELECT 1 FROM chat_conversation_members WHERE conversation_id = $1 AND user_id = $2',
+      [convId, req.user.id]
+    );
+    if (!memberCheck.rows.length) {
+      return res.status(403).json({ ok: false, error: 'You are not a member of this conversation.' });
+    }
+
+    // Set cleared_at and is_hidden for THIS user only. Other member(s) unaffected!
+    await pool.query(
+      'UPDATE chat_conversation_members SET cleared_at = now(), is_hidden = TRUE WHERE conversation_id = $1 AND user_id = $2',
+      [convId, req.user.id]
+    );
+
+    res.json({ ok: true, conversationId: convId });
+  } catch (err) {
+    console.error('Delete conversation error:', err);
+    res.status(500).json({ ok: false, error: 'Could not delete conversation.' });
   }
 });
 
@@ -809,27 +1099,41 @@ app.get('/api/conversations/:id/members', authMiddleware, async (req, res) => {
   }
 });
 
-// Messages: Load History for Conversation
+// Messages: Load History for Conversation (filtered by user's cleared_at)
 app.get('/api/conversations/:id/messages', authMiddleware, async (req, res) => {
   try {
     const convId = Number(req.params.id);
 
-    // Verify membership
+    // Verify membership and fetch cleared_at
     const memberCheck = await pool.query(
-      'SELECT 1 FROM chat_conversation_members WHERE conversation_id = $1 AND user_id = $2',
+      'SELECT cleared_at FROM chat_conversation_members WHERE conversation_id = $1 AND user_id = $2',
       [convId, req.user.id]
     );
     if (!memberCheck.rows.length) {
       return res.status(403).json({ ok: false, error: 'You are not a member of this conversation.' });
     }
 
-    const { rows } = await pool.query(
-      `SELECT id, conversation_id, sender_id, sender_name, body, media_url, media_type, media_name, created_at
-       FROM chat_messages
-       WHERE conversation_id = $1 AND is_deleted = FALSE
-       ORDER BY id DESC LIMIT 100`,
-      [convId]
-    );
+    const clearedAt = memberCheck.rows[0].cleared_at ? new Date(memberCheck.rows[0].cleared_at) : null;
+    let rows;
+    if (clearedAt) {
+      const q = await pool.query(
+        `SELECT id, conversation_id, sender_id, sender_name, body, media_url, media_type, media_name, created_at
+         FROM chat_messages
+         WHERE conversation_id = $1 AND is_deleted = FALSE AND created_at > $2
+         ORDER BY id DESC LIMIT 100`,
+        [convId, clearedAt]
+      );
+      rows = q.rows;
+    } else {
+      const q = await pool.query(
+        `SELECT id, conversation_id, sender_id, sender_name, body, media_url, media_type, media_name, created_at
+         FROM chat_messages
+         WHERE conversation_id = $1 AND is_deleted = FALSE
+         ORDER BY id DESC LIMIT 100`,
+        [convId]
+      );
+      rows = q.rows;
+    }
 
     const messages = rows
       .map((r) => ({
@@ -852,7 +1156,7 @@ app.get('/api/conversations/:id/messages', authMiddleware, async (req, res) => {
   }
 });
 
-// Media: Upload Photo / Video
+// Media: Upload Photo / Video / Audio (Voice Message)
 app.post('/api/upload', authMiddleware, upload.single('media'), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ ok: false, error: 'No media file provided.' });
@@ -860,7 +1164,19 @@ app.post('/api/upload', authMiddleware, upload.single('media'), (req, res) => {
 
   const mime = req.file.mimetype.toLowerCase();
   const isVideo = mime.startsWith('video/');
-  const mediaType = isVideo ? 'video' : 'image';
+  const isAudio =
+    mime.startsWith('audio/') ||
+    mime.includes('webm') ||
+    mime.includes('ogg') ||
+    mime.includes('wav') ||
+    req.file.originalname.endsWith('.webm') ||
+    req.file.originalname.endsWith('.ogg') ||
+    req.file.originalname.endsWith('.wav') ||
+    req.file.originalname.endsWith('.mp3');
+
+  let mediaType = 'image';
+  if (isVideo) mediaType = 'video';
+  if (isAudio) mediaType = 'audio';
   const url = `${PREFIX}/static/uploads/${req.file.filename}`;
 
   res.json({
@@ -1179,6 +1495,22 @@ io.on('connection', async (socket) => {
         return reply({ ok: false, error: 'Not a member of this conversation.' });
       }
 
+      // Check direct conversation friend permission (Non-friends cannot message)
+      const convRes = await pool.query('SELECT type FROM chat_conversations WHERE id = $1', [convId]);
+      if (convRes.rows.length && convRes.rows[0].type === 'direct') {
+        const otherMem = await pool.query(
+          'SELECT user_id FROM chat_conversation_members WHERE conversation_id = $1 AND user_id != $2 LIMIT 1',
+          [convId, user.id]
+        );
+        if (otherMem.rows.length) {
+          const otherId = Number(otherMem.rows[0].user_id);
+          const isFriend = await areFriends(user.id, otherId);
+          if (!isFriend) {
+            return reply({ ok: false, error: 'You must be friends to exchange messages.' });
+          }
+        }
+      }
+
       // Save message
       const msgRes = await pool.query(
         `INSERT INTO chat_messages (conversation_id, sender_id, sender_name, body, media_url, media_type, media_name)
@@ -1186,6 +1518,9 @@ io.on('connection', async (socket) => {
          RETURNING id, created_at`,
         [convId, user.id, user.name, text, mediaUrl, mediaType, mediaName]
       );
+
+      // Unhide conversation for all members when new message arrives
+      await pool.query('UPDATE chat_conversation_members SET is_hidden = FALSE WHERE conversation_id = $1', [convId]);
 
       const msg = {
         id: Number(msgRes.rows[0].id),
