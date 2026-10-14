@@ -176,24 +176,152 @@
     }, 400);
   }
 
-  /* ----------------------------------------------------------------- sound */
-  function playChime() {
+  /* ----------------------------------------------------------------- sound engine */
+  let audioCtx = null;
+  function getAudioContext() {
     try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      if (!audioCtx) {
+        const AudioCtxClass = window.AudioContext || window.webkitAudioContext;
+        if (AudioCtxClass) {
+          audioCtx = new AudioCtxClass();
+        }
+      }
+      if (audioCtx && audioCtx.state === 'suspended') {
+        audioCtx.resume().catch(() => {});
+      }
+      return audioCtx;
+    } catch {
+      return null;
+    }
+  }
+
+  // Sent message sound: satisfying upward pop
+  function playSendSound() {
+    try {
+      const ctx = getAudioContext();
+      if (!ctx) return;
+      const now = ctx.currentTime;
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
-      osc.frequency.setValueAtTime(880, ctx.currentTime + 0.1); // A5
-      gain.gain.setValueAtTime(0.08, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35);
+      osc.frequency.setValueAtTime(380, now);
+      osc.frequency.exponentialRampToValueAtTime(780, now + 0.1);
+      gain.gain.setValueAtTime(0.14, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
       osc.connect(gain);
       gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.35);
-    } catch (e) {
-      /* AudioContext not allowed or not supported */
-    }
+      osc.start(now);
+      osc.stop(now + 0.15);
+    } catch {}
+  }
+
+  // Incoming message chime: dual-tone glass ping
+  function playReceiveSound() {
+    try {
+      const ctx = getAudioContext();
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      const osc1 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(587.33, now); // D5
+      gain1.gain.setValueAtTime(0.12, now);
+      gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
+      osc1.start(now);
+      osc1.stop(now + 0.22);
+
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(880, now + 0.08); // A5
+      gain2.gain.setValueAtTime(0.001, now);
+      gain2.gain.setValueAtTime(0.14, now + 0.08);
+      gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.32);
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      osc2.start(now + 0.08);
+      osc2.stop(now + 0.34);
+    } catch {}
+  }
+
+  // Backward-compatible alias
+  function playChime() {
+    playReceiveSound();
+  }
+
+  // Soft keyboard typing tick (rate-limited for smooth feel)
+  let lastTypingTick = 0;
+  function playTypingTick() {
+    const nowMs = Date.now();
+    if (nowMs - lastTypingTick < 70) return;
+    lastTypingTick = nowMs;
+    try {
+      const ctx = getAudioContext();
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const filter = ctx.createBiquadFilter();
+
+      osc.type = 'triangle';
+      const freq = 420 + Math.random() * 80;
+      osc.frequency.setValueAtTime(freq, now);
+
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(1400, now);
+
+      gain.gain.setValueAtTime(0.028, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.025);
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.03);
+    } catch {}
+  }
+
+  // Voice recording start sound: brief rising chirp
+  function playRecordStartSound() {
+    try {
+      const ctx = getAudioContext();
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(440, now);
+      osc.frequency.exponentialRampToValueAtTime(660, now + 0.08);
+      gain.gain.setValueAtTime(0.1, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.12);
+    } catch {}
+  }
+
+  // Voice recording stop sound: brief falling chirp
+  function playRecordStopSound() {
+    try {
+      const ctx = getAudioContext();
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(660, now);
+      osc.frequency.exponentialRampToValueAtTime(380, now + 0.08);
+      gain.gain.setValueAtTime(0.08, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.12);
+    } catch {}
   }
 
   function escapeHtml(str) {
@@ -686,7 +814,7 @@
 
     el.input.disabled = false;
     el.send.disabled = false;
-    el.input.placeholder = `Message ${conv.name}… (Enter to send)`;
+    el.input.placeholder = `Message ${conv.name}…`;
 
     // Join room on socket
     if (socket) {
@@ -776,31 +904,49 @@
       bubble.appendChild(p);
     }
 
-    // Media (Photo, Video, or Audio)
-    if (msg.mediaUrl) {
+    // Media (Photo, Video, or Audio / Voice Note)
+    const mediaUrl = msg.mediaUrl || msg.media_url;
+    if (mediaUrl) {
       const mediaDiv = document.createElement('div');
-      mediaDiv.className = 'msg-media';
+      const rawType = (msg.mediaType || msg.media_type || '').toLowerCase();
+      const mediaName = (msg.mediaName || msg.media_name || '').toLowerCase();
+      const isAudio =
+        rawType === 'audio' ||
+        rawType.startsWith('audio/') ||
+        mediaName.includes('voice note') ||
+        /\.(webm|ogg|wav|mp3|m4a|aac|opus)(\?|$)/i.test(mediaUrl);
+      const isVideo =
+        !isAudio &&
+        (rawType === 'video' ||
+         rawType.startsWith('video/') ||
+         /\.(mp4|mov|mkv)(\?|$)/i.test(mediaUrl));
 
-      if (msg.mediaType === 'image') {
-        const img = document.createElement('img');
-        img.src = msg.mediaUrl;
-        img.alt = msg.mediaName || 'Photo';
-        img.loading = 'lazy';
-        img.onclick = () => openLightbox(msg.mediaUrl);
-        mediaDiv.appendChild(img);
-      } else if (msg.mediaType === 'audio') {
+      if (isAudio) {
+        mediaDiv.className = 'msg-media msg-audio';
+        const header = document.createElement('div');
+        header.className = 'voice-bubble-header';
+        header.innerHTML = '<svg viewBox="0 0 24 24" class="voice-bubble-icon" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg><span>Voice Note</span>';
+
         const audio = document.createElement('audio');
-        audio.src = msg.mediaUrl;
+        audio.src = mediaUrl;
         audio.controls = true;
         audio.preload = 'metadata';
-        mediaDiv.className = 'msg-media msg-audio';
-        mediaDiv.appendChild(audio);
-      } else if (msg.mediaType === 'video') {
+        mediaDiv.append(header, audio);
+      } else if (isVideo) {
+        mediaDiv.className = 'msg-media';
         const video = document.createElement('video');
-        video.src = msg.mediaUrl;
+        video.src = mediaUrl;
         video.controls = true;
         video.preload = 'metadata';
         mediaDiv.appendChild(video);
+      } else {
+        mediaDiv.className = 'msg-media';
+        const img = document.createElement('img');
+        img.src = mediaUrl;
+        img.alt = msg.mediaName || 'Photo';
+        img.loading = 'lazy';
+        img.onclick = () => openLightbox(mediaUrl);
+        mediaDiv.appendChild(img);
       }
       bubble.appendChild(mediaDiv);
     }
@@ -962,6 +1108,7 @@
         }
       });
 
+      playSendSound();
       el.input.value = '';
       clearMediaSelection();
     } catch (err) {
@@ -986,9 +1133,10 @@
     }
   });
 
-  // Typing indicator broadcast
+  // Typing indicator broadcast & typing sound effect
   let typingTimer = null;
   el.input.oninput = () => {
+    playTypingTick();
     if (!state.activeConversationId || !socket) return;
     socket.emit('typing', { conversationId: state.activeConversationId, typing: true });
     clearTimeout(typingTimer);
@@ -999,34 +1147,44 @@
 
   /* ------------------------------------------------------------- voice messages */
   let mediaRecorder = null;
+  let voiceStream = null;
   let voiceChunks = [];
   let voiceTimerInterval = null;
   let voiceSeconds = 0;
 
   async function startVoiceRecording() {
-    if (!state.activeConversationId) return;
+    if (!state.activeConversationId) {
+      toast('Please select a conversation first');
+      return;
+    }
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === 'undefined') {
+      toast('Microphone access is not supported in this browser or requires HTTPS.');
+      return;
+    }
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       voiceChunks = [];
       voiceSeconds = 0;
       el.voiceRecordTimer.textContent = '0:00';
       el.voiceRecordBar.hidden = false;
+      playRecordStartSound();
 
       let options = {};
-      if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
         options = { mimeType: 'audio/webm;codecs=opus' };
-      } else if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/mp4')) {
+      } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+        options = { mimeType: 'audio/webm' };
+      } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
         options = { mimeType: 'audio/mp4' };
+      } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
+        options = { mimeType: 'audio/ogg' };
       }
 
-      mediaRecorder = new MediaRecorder(stream, options);
+      mediaRecorder = new MediaRecorder(voiceStream, options);
       mediaRecorder.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) voiceChunks.push(e.data);
-      };
-
-      mediaRecorder.onstop = () => {
-        stream.getTracks().forEach((track) => track.stop());
-        clearInterval(voiceTimerInterval);
       };
 
       mediaRecorder.start(250);
@@ -1038,34 +1196,66 @@
         el.voiceRecordTimer.textContent = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
       }, 1000);
     } catch (err) {
-      toast('Microphone access denied or not supported.');
+      toast('Microphone access denied or audio recording failed.');
       el.voiceRecordBar.hidden = true;
+      if (voiceStream) {
+        voiceStream.getTracks().forEach((t) => t.stop());
+        voiceStream = null;
+      }
     }
   }
 
   function stopVoiceRecording(discard = false) {
     if (!mediaRecorder) return;
+    const rec = mediaRecorder;
+    const stream = voiceStream;
+    clearInterval(voiceTimerInterval);
+    el.voiceRecordBar.hidden = true;
+    mediaRecorder = null;
+    voiceStream = null;
+
     if (discard) {
-      mediaRecorder.ondataavailable = null;
-      mediaRecorder.stop();
-      mediaRecorder = null;
+      playRecordStopSound();
+      rec.ondataavailable = null;
+      rec.onstop = null;
+      if (rec.state !== 'inactive') rec.stop();
+      if (stream) stream.getTracks().forEach((t) => t.stop());
       voiceChunks = [];
-      clearInterval(voiceTimerInterval);
-      el.voiceRecordBar.hidden = true;
-    } else {
-      const rec = mediaRecorder;
-      rec.onstop = async () => {
-        clearInterval(voiceTimerInterval);
-        el.voiceRecordBar.hidden = true;
-        if (!voiceChunks.length) return;
-        const mimeType = rec.mimeType || 'audio/webm';
-        const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
-        const blob = new Blob(voiceChunks, { type: mimeType });
-        const file = new File([blob], `voice-${Date.now()}.${ext}`, { type: mimeType });
-        mediaRecorder = null;
-        voiceChunks = [];
-        await sendVoiceFile(file);
-      };
+      return;
+    }
+
+    playRecordStopSound();
+
+    try {
+      if (rec.state === 'recording') {
+        rec.requestData();
+      }
+    } catch {}
+
+    rec.onstop = async () => {
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+
+      if (!voiceChunks.length) {
+        toast('Voice note was empty or too short');
+        return;
+      }
+
+      const rawType = rec.mimeType || 'audio/webm';
+      const cleanType = rawType.split(';')[0];
+      const ext = cleanType.includes('mp4') ? 'mp4' : (cleanType.includes('ogg') ? 'ogg' : 'webm');
+      const blob = new Blob(voiceChunks, { type: cleanType });
+      voiceChunks = [];
+
+      if (blob.size < 50) {
+        toast('Voice note was too short');
+        return;
+      }
+
+      const file = new File([blob], `voice-${Date.now()}.${ext}`, { type: cleanType });
+      await sendVoiceFile(file);
+    };
+
+    if (rec.state !== 'inactive') {
       rec.stop();
     }
   }
@@ -1091,6 +1281,7 @@
         mediaType: 'audio',
         mediaName: 'Voice note',
       });
+      playSendSound();
     } catch (err) {
       toast(err.message);
     }
@@ -1897,7 +2088,7 @@
 
   function updateMenuButton() {
     if (!el.menuBtn) return;
-    el.menuBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>';
+    el.menuBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>';
     el.menuBtn.setAttribute('title', 'Toggle navigation');
     el.menuBtn.setAttribute('aria-label', 'Toggle navigation');
   }

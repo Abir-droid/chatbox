@@ -7,6 +7,8 @@
   <meta name="app-base" content="{{BASE}}">
   <title>chatbox</title>
   <link rel="icon" type="image/svg+xml" href="{{BASE}}/static/favicon.svg">
+  <link rel="alternate icon" href="{{BASE}}/static/favicon.svg">
+  <link rel="apple-touch-icon" href="{{BASE}}/static/favicon.svg">
   <link rel="stylesheet" href="{{BASE}}/static/app.css?v={{VERSION}}">
   <style>
     [hidden] { display: none !important; }
@@ -59,27 +61,26 @@
 
       <form class="auth-form" id="auth-form" autocomplete="on">
         <div class="field" id="name-field" hidden>
-          <label for="auth-name">Your Full Name</label>
+          <label for="auth-name">Full Name</label>
           <div class="input-wrap">
             <svg class="input-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-            <input type="text" id="auth-name" placeholder="Alice Johnson" autocomplete="name">
+            <input type="text" id="auth-name" placeholder="Full name" autocomplete="name">
           </div>
         </div>
 
         <div class="field">
-          <label for="auth-phone">Phone Number (Unique ID)</label>
+          <label for="auth-phone">Phone Number</label>
           <div class="input-wrap">
             <svg class="input-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-            <input type="tel" id="auth-phone" placeholder="+1234567890 or 017xxxxxxxx" autocomplete="tel" required>
+            <input type="tel" id="auth-phone" placeholder="Phone number" autocomplete="tel" required>
           </div>
-          <span class="field-hint">Used by friends and groups to add you</span>
         </div>
 
         <div class="field">
           <label for="auth-password">Password</label>
           <div class="input-wrap">
             <svg class="input-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-            <input type="password" id="auth-password" placeholder="••••••••" autocomplete="current-password" required minlength="6">
+            <input type="password" id="auth-password" placeholder="Password" autocomplete="current-password" required minlength="6">
             <button type="button" class="input-action-btn" id="toggle-pw-btn" title="Toggle password visibility" aria-label="Toggle password visibility">
               <svg id="pw-eye" viewBox="0 0 24 24" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
               <svg id="pw-eye-off" viewBox="0 0 24 24" aria-hidden="true" hidden><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
@@ -206,8 +207,12 @@
     <main class="thread" id="thread">
       <!-- Conversation Header -->
       <header class="thread-head" id="thread-head">
-        <button type="button" class="icon-btn menu-btn" id="menu-btn" aria-label="Open navigation" aria-controls="rail" aria-expanded="false">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        <button type="button" class="icon-btn menu-btn" id="menu-btn" aria-label="Toggle navigation" aria-controls="rail" aria-expanded="false" title="Toggle navigation">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="4" y1="6" x2="20" y2="6"/>
+            <line x1="4" y1="12" x2="20" y2="12"/>
+            <line x1="4" y1="18" x2="20" y2="18"/>
+          </svg>
         </button>
 
         <div class="conv-details">
@@ -217,7 +222,7 @@
           <div class="conv-text">
             <h1 class="conv-title" id="conv-title">Select a conversation</h1>
             <div class="conv-sub-line">
-              <span class="conv-sub" id="conv-sub">or start a new chat</span>
+              <span class="conv-sub" id="conv-sub"></span>
             </div>
           </div>
         </div>
@@ -282,7 +287,7 @@
         </button>
 
         <button type="button" class="icon-btn composer-btn" id="voice-btn" title="Record voice message" aria-label="Voice message">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
         </button>
 
         <div class="emoji-container">
@@ -295,7 +300,7 @@
         </div>
 
         <div class="input-container">
-          <textarea id="input" rows="1" maxlength="1500" placeholder="Type a message (Press Enter to send, Shift+Enter for new line)…" enterkeyhint="send" disabled></textarea>
+          <textarea id="input" rows="1" maxlength="1500" placeholder="Type a message…" enterkeyhint="send" disabled></textarea>
         </div>
 
         <button type="submit" class="send" id="send" disabled title="Send message" aria-label="Send">
@@ -353,7 +358,7 @@
           <label for="dm-phone">Friend's Phone Number</label>
           <div class="input-wrap">
             <svg class="input-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-            <input type="tel" id="dm-phone" placeholder="+1234567890 or 017xxxxxxxx" required>
+            <input type="tel" id="dm-phone" placeholder="Phone number" required>
           </div>
         </div>
         <p class="field-error" id="dm-error"></p>
@@ -369,14 +374,14 @@
           <label for="group-name">Group Name</label>
           <div class="input-wrap">
             <svg class="input-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-            <input type="text" id="group-name" placeholder="Project Team, Family…" required maxlength="40">
+            <input type="text" id="group-name" placeholder="Group name" required maxlength="40">
           </div>
         </div>
 
         <div class="field">
-          <label for="group-members">Member Phone Numbers (comma-separated)</label>
+          <label for="group-members">Member Phone Numbers</label>
           <div class="input-wrap text-wrap">
-            <textarea id="group-members" rows="2" placeholder="+1234567890, +1987654321"></textarea>
+            <textarea id="group-members" rows="2" placeholder="Phone numbers (comma-separated)"></textarea>
           </div>
         </div>
         <p class="field-error" id="group-error"></p>
@@ -403,7 +408,7 @@
           <label for="friend-phone">Friend's Phone Number</label>
           <div class="input-wrap">
             <svg class="input-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-            <input type="tel" id="friend-phone" placeholder="+1234567890" required>
+            <input type="tel" id="friend-phone" placeholder="Phone number" required>
           </div>
         </div>
         <p class="field-error" id="friend-error"></p>
@@ -429,7 +434,7 @@
       <form id="add-member-form" class="inline-add-form">
         <div class="input-wrap flex-1">
           <svg class="input-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-          <input type="tel" id="new-member-phone" placeholder="Add member by phone (+1234567890)" required>
+          <input type="tel" id="new-member-phone" placeholder="Phone number" required>
         </div>
         <button type="submit" class="primary">Add Member</button>
       </form>
@@ -502,7 +507,7 @@
           <label for="profile-password">Change Password (optional)</label>
           <div class="input-wrap">
             <svg class="input-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-            <input type="password" id="profile-password" placeholder="Leave blank to keep current" minlength="6">
+            <input type="password" id="profile-password" placeholder="New password" minlength="6">
           </div>
         </div>
 

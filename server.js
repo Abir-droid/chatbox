@@ -293,10 +293,23 @@ const upload = multer({
   storage,
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
   fileFilter: (req, file, cb) => {
-    const mime = file.mimetype.toLowerCase();
+    const mime = (file.mimetype || '').toLowerCase();
+    const orig = (file.originalname || '').toLowerCase();
     const isImage = mime.startsWith('image/');
-    const isVideo = mime.startsWith('video/');
-    const isAudio = mime.startsWith('audio/') || mime.includes('webm') || mime.includes('ogg') || mime.includes('wav') || mime.includes('mp4');
+    const isAudio =
+      orig.startsWith('voice-') ||
+      mime.startsWith('audio/') ||
+      orig.endsWith('.webm') ||
+      orig.endsWith('.ogg') ||
+      orig.endsWith('.wav') ||
+      orig.endsWith('.mp3') ||
+      orig.endsWith('.m4a') ||
+      orig.endsWith('.aac') ||
+      orig.endsWith('.opus') ||
+      mime.includes('webm') ||
+      mime.includes('ogg') ||
+      mime.includes('wav');
+    const isVideo = !isAudio && (mime.startsWith('video/') || orig.endsWith('.mp4') || orig.endsWith('.mov'));
     if (isImage || isVideo || isAudio) {
       cb(null, true);
     } else {
@@ -340,6 +353,12 @@ app.use((req, res, next) => {
     ].join('; ')
   );
   next();
+});
+
+// Favicon route for browser root requests
+app.get('/favicon.ico', (req, res) => {
+  res.setHeader('Content-Type', 'image/svg+xml');
+  res.sendFile(path.join(__dirname, 'public', 'favicon.svg'));
 });
 
 // Serve static assets and uploaded media
@@ -1162,21 +1181,23 @@ app.post('/api/upload', authMiddleware, upload.single('media'), (req, res) => {
     return res.status(400).json({ ok: false, error: 'No media file provided.' });
   }
 
-  const mime = req.file.mimetype.toLowerCase();
-  const isVideo = mime.startsWith('video/');
+  const mime = (req.file.mimetype || '').toLowerCase();
+  const orig = (req.file.originalname || '').toLowerCase();
   const isAudio =
+    orig.startsWith('voice-') ||
     mime.startsWith('audio/') ||
+    orig.endsWith('.webm') ||
+    orig.endsWith('.ogg') ||
+    orig.endsWith('.wav') ||
+    orig.endsWith('.mp3') ||
+    orig.endsWith('.m4a') ||
+    orig.endsWith('.aac') ||
+    orig.endsWith('.opus') ||
     mime.includes('webm') ||
     mime.includes('ogg') ||
-    mime.includes('wav') ||
-    req.file.originalname.endsWith('.webm') ||
-    req.file.originalname.endsWith('.ogg') ||
-    req.file.originalname.endsWith('.wav') ||
-    req.file.originalname.endsWith('.mp3');
-
-  let mediaType = 'image';
-  if (isVideo) mediaType = 'video';
-  if (isAudio) mediaType = 'audio';
+    mime.includes('wav');
+  const isVideo = !isAudio && (mime.startsWith('video/') || orig.endsWith('.mp4') || orig.endsWith('.mov'));
+  const mediaType = isAudio ? 'audio' : (isVideo ? 'video' : 'image');
   const url = `${PREFIX}/static/uploads/${req.file.filename}`;
 
   res.json({

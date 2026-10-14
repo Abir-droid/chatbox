@@ -270,6 +270,39 @@ async function run() {
   assert.equal(emmaMsgsFinal.json.messages.length, 2);
   console.log('  ✔ Emma sees all 2 messages in full history');
 
+  // [Test 6] Favicon & Voice Note Messaging Verification
+  console.log('\n[Test 6] Favicon & Voice Note Messaging Verification...');
+  const favRes = await request('/favicon.ico');
+  assert.equal(favRes.status, 200);
+  assert.match(favRes.headers['content-type'], /image\/svg\+xml/);
+  console.log('  ✔ /favicon.ico successfully served with SVG icon');
+
+  await new Promise((resolve) => {
+    socketDave.emit(
+      'message',
+      {
+        conversationId: convId,
+        text: '',
+        mediaUrl: '/static/uploads/voice-test.webm',
+        mediaType: 'audio',
+        mediaName: 'Voice note',
+      },
+      (ack) => {
+        assert.equal(ack.ok, true);
+        resolve();
+      }
+    );
+  });
+
+  const emmaMsgsVoice = await request(`/api/conversations/${convId}/messages`, {
+    headers: { Authorization: `Bearer ${tokenEmma}` },
+  });
+  const voiceMsg = emmaMsgsVoice.json.messages.find((m) => m.mediaType === 'audio');
+  assert.ok(voiceMsg, 'Voice note message is present in conversation history');
+  assert.equal(voiceMsg.mediaType, 'audio');
+  assert.equal(voiceMsg.mediaName, 'Voice note');
+  console.log('  ✔ Voice note audio message exchanged and verified in history');
+
   socketDave.disconnect();
   socketEmma.disconnect();
   server.close();
