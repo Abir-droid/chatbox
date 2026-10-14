@@ -1,112 +1,93 @@
 # chatbox
 
-A small self-hosted real-time chat: rooms, message history, who is online, typing indicators, light and dark themes.
+A self-hosted, full-featured real-time chat application with phone number authentication, 1-on-1 direct messaging, group chats, friend lists, emoji & media (photo/video), soft deletion, browser notifications, and an administrator audit & moderation dashboard.
 
-- **Server:** Node.js, Express, Socket.IO
-- **Database:** PostgreSQL (`pg`); tables `chat_rooms` and `chat_messages`, created automatically
-- **Client:** plain HTML, CSS and JavaScript (no build step). Fonts are self-hosted.
-- **Deployed at:** `https://abirdroid.ddns.net/chatbox` (a subpath, handled for you; see below)
+- **Server:** Node.js, Express, Socket.IO, Multer
+- **Database:** PostgreSQL (`pg`), prefixed `chat_*` tables created automatically
+- **Client:** Modern responsive web application (HTML5, CSS3, JavaScript, Web Audio API, Web Notifications API). Fonts and assets are self-hosted.
+- **Subpath ready:** Designed for `https://abirdroid.ddns.net/chatbox` and Coolify reverse proxies (Traefik).
+
+---
+
+## Features
+
+1. **Phone Number Authentication**:
+   - Unique phone number registration & login with secure password hashing (`scrypt`).
+   - The phone number serves as each user's unique identifier.
+   - The first registered user (or the user matching `ADMIN_PHONE`) automatically receives administrator rights.
+
+2. **Group Chats**:
+   - Create groups and add members by phone number.
+   - Member management dialog showing all participants, roles (admin/member), and online status.
+
+3. **1-on-1 Direct Messaging & Friends List**:
+   - Chat privately with multiple users separately by their phone number.
+   - Dedicated "Friends" tab to save contacts and view their real-time online status.
+
+4. **Administrator Audit & Moderation Dashboard**:
+   - Dedicated dashboard accessible only to admin users (`is_admin: true`).
+   - Overview metrics: Total Users, Online Users, Total Messages, Deleted Messages, Groups & DMs.
+   - **User Moderation**: View all registered users, message counts, and toggle Block/Suspend. Suspended accounts are immediately disconnected and barred from logging in.
+   - **Chat History Audit**: Audit any conversation's complete message history, **including soft-deleted messages** flagged with `[DELETED BY USER]` badges and timestamps.
+
+5. **Emoji & Media Sending (Photos & Videos)**:
+   - Built-in popup emoji picker with smileys, gestures, and everyday icons.
+   - Attach photos (`jpg, png, gif, webp`) and videos (`mp4, webm, mov`).
+   - Instant in-app previews: Photos open in a lightbox viewer; videos play directly inside chat bubbles.
+
+6. **Browser & Audio Notifications**:
+   - Web Notifications API integration: Receive desktop notifications when messages arrive while the tab is in the background or when viewing another chat.
+   - Synthesized gentle audio chime for incoming messages.
+
+---
 
 ## Project layout
 
 ```
 chatbox/
-├── server.js            Express + Socket.IO + PostgreSQL, subpath handling
-├── views/index.html     page template ({{BASE}} is filled in from APPLICATION_ROOT)
-├── public/              app.js, app.css, theme.js, favicon.svg, fonts/
-├── Dockerfile           production image for Coolify
-├── .env.example         copy to .env for local development
+├── server.js            Express + Socket.IO + PostgreSQL backend
+├── views/index.html     App template (dynamic {{BASE}} for subpaths)
+├── public/
+│   ├── app.js           Frontend application logic
+│   ├── app.css          Responsive stylesheet (Light/Dark themes)
+│   ├── theme.js         FOUC-preventing theme loader
+│   ├── favicon.svg      Vector icon
+│   ├── fonts/           Self-hosted Figtree & Bricolage Grotesque fonts
+│   └── uploads/         Uploaded media files (.gitignored)
+├── test.js              Automated 8-phase test suite (npm test)
+├── Dockerfile           Alpine production container for Coolify
+├── .env.example         Environment template
 └── package.json
 ```
 
-## 1. Database
+---
 
-Create a database and user once (adjust the password):
+## Run Locally
 
-```sql
-CREATE USER chatbox WITH PASSWORD 'change-me';
-CREATE DATABASE chatbox OWNER chatbox;
-```
-
-The app creates its own tables on start. Its tables are prefixed `chat_`, so it can share a database with other apps.
-
-Connection string format: `postgres://chatbox:change-me@HOST:5432/chatbox`
-
-## 2. Run locally (dev machine)
-
-Needs Node.js 22.9 or newer (`node -v`).
+Requirements: Node.js 22.9+ (`node -v`).
 
 ```powershell
-cd F:\my_projects\chatbox
+# 1. Install dependencies
 npm install
-copy .env.example .env      # then edit DATABASE_URL in .env
+
+# 2. Run automated test suite (uses built-in pg-mem emulator; no database setup needed!)
+npm test
+
+# 3. Start local development server
 npm run dev
 ```
 
-Open http://localhost:3000.
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-To try the subpath exactly as in production, set `APPLICATION_ROOT=/chatbox` in `.env` and open http://localhost:3000/chatbox.
+*(To test the subpath locally, set `APPLICATION_ROOT=/chatbox` in `.env` and visit `http://localhost:3000/chatbox`)*
 
-## 3. Subpath: how `/chatbox` works
+---
 
-The app lives at `https://abirdroid.ddns.net/chatbox`, not at `/`. Two things break under a subpath: routing (the app gets `/chatbox/...` but expects `/...`) and generated URLs (links and API calls pointing at `/...`). chatbox handles both with one environment variable, `APPLICATION_ROOT`, the same pattern as your Flask notes.
+## Coolify Deployment Settings
 
-| Piece | How it is handled |
+| Setting in Coolify | Value |
 |---|---|
-| Incoming requests | `server.js` strips `/chatbox` from the URL if it is still there, for normal requests and WebSocket upgrades. It works whether or not Traefik strips the prefix first. |
-| Page URLs | `views/index.html` uses `{{BASE}}/static/app.js` etc. The server replaces `{{BASE}}` with the prefix when it starts. |
-| Socket.IO | The browser connects with `path: BASE + '/socket.io'`, so it requests `/chatbox/socket.io/`. |
-| Fonts inside CSS | Relative URLs (`fonts/...`) resolve next to `app.css`, so they follow the prefix automatically. |
-| Health check | `/healthz` (and `/chatbox/healthz`) also checks the database. |
-
-Never write `/chatbox` into code or templates. Set it once as `APPLICATION_ROOT`.
-
-## 4. Deploy with Coolify
-
-1. **Push the project to Git** (GitHub, Gitea, etc.). `node_modules` and `.env` are ignored.
-2. **Create the app** in Coolify: New Resource, choose your repository, **Build Pack: Dockerfile**.
-3. **Domains:** `https://abirdroid.ddns.net/chatbox`. Coolify creates the Traefik rule with `PathPrefix(`/chatbox`)`.
-4. **Ports Exposes:** `3000`.
-5. **Strip Prefixes:** leave the default. The app works with it on or off.
-6. **Environment Variables** (runtime):
-   - `APPLICATION_ROOT=/chatbox`
-   - `DATABASE_URL=postgres://chatbox:change-me@HOST:5432/chatbox`
-7. **Deploy**, then open `https://abirdroid.ddns.net/chatbox`.
-
-### Reaching PostgreSQL from the container
-
-`HOST` in `DATABASE_URL` depends on where PostgreSQL runs:
-
-- **PostgreSQL is a Coolify database on the same server:** use its internal URL from the database page, and enable **Connect to Predefined Network** on the chatbox app so both share a network.
-- **PostgreSQL runs on the host or another machine:** use that machine's IP (for example the server's LAN IP) and make sure `postgresql.conf` has `listen_addresses` set and `pg_hba.conf` allows the Docker network. `localhost` inside a container means the container itself, not the host.
-
-### Internet access for `abirdroid.ddns.net`
-
-Forward ports 80 and 443 on your router to the Coolify server. Traefik gets the HTTPS certificate automatically, which needs port 80 reachable from the internet.
-
-### Multiple apps on one domain
-
-Each app gets its own `PathPrefix` and its own `APPLICATION_ROOT`. Do not give two apps the same prefix.
-
-## Configuration
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `DATABASE_URL` | none (required) | PostgreSQL connection string |
-| `APPLICATION_ROOT` | empty | Subpath such as `/chatbox` |
-| `PORT` | `3000` | Port the server listens on |
-| `HOST` | `0.0.0.0` | Address the server binds to |
-| `PGSSL` | off | Set `true` if PostgreSQL requires TLS |
-| `PGSSL_REJECT_UNAUTHORIZED` | on | Set `false` for self-signed certificates |
-
-## Behaviour and limits
-
-- Display names: 2 to 24 characters (letters in any language, numbers, spaces, `.` `_` `-`). There are no accounts or passwords, so anyone can use any name.
-- Room names: 1 to 24 lowercase letters, numbers, `-` or `_`. Up to 40 rooms.
-- Messages: up to 1000 characters; a burst of 6, then one per second per connection.
-- History: the last 100 messages are loaded when you join a room; the last 500 per room are kept.
-- Run a single instance. Running several would need the Socket.IO Redis adapter.
-
-## Credits
-
-Fonts: Figtree and Bricolage Grotesque, both under the SIL Open Font License (licenses are in `public/fonts/`).
+| **Build Pack** | `Dockerfile` |
+| **Domain** | `https://abirdroid.ddns.net/chatbox` |
+| **Ports Exposes** | `3000` |
+| **Environment Variables** | `APPLICATION_ROOT=/chatbox`<br>`DATABASE_URL=postgres://user:password@pg-host:5432/chatbox`<br>`ADMIN_PHONE=+1234567890` *(optional; designates initial admin)* |

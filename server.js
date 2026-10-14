@@ -3,24 +3,23 @@
 /*
  * chatbox server
  *
- * Express serves the page and static files, Socket.IO carries the real-time
- * messages, and PostgreSQL (via `pg`) keeps rooms and message history.
+ * Full-featured real-time chat with phone number auth, 1-on-1 direct messages,
+ * group chats with member management, friend lists, emoji & media (photo/video),
+ * soft deletion, browser notifications, and an admin audit & moderation dashboard.
  *
  * Subpath deployment (e.g. https://abirdroid.ddns.net/chatbox):
- *   Set APPLICATION_ROOT=/chatbox. The app then works whether or not the
- *   reverse proxy (Traefik in Coolify) strips the prefix before forwarding:
- *     - a request for /chatbox/static/app.js and one for /static/app.js both work
- *     - the same applies to /chatbox/socket.io/ and /socket.io/ (WebSocket upgrades too)
- *   Every URL the browser uses is generated with the prefix, so nothing is hardcoded.
- *   Leave APPLICATION_ROOT unset for root deployments and local development.
+ *   Set APPLICATION_ROOT=/chatbox. Works whether or not the reverse proxy
+ *   (Traefik in Coolify) strips the prefix before forwarding.
  */
 
 const fs = require('node:fs');
 const path = require('node:path');
 const http = require('node:http');
+const crypto = require('node:crypto');
 const express = require('express');
 const { Server } = require('socket.io');
 const { Pool } = require('pg');
+const multer = require('multer');
 
 /* ------------------------------------------------------------------ config */
 
@@ -35,27 +34,23 @@ const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 const PREFIX = normalizePrefix(process.env.APPLICATION_ROOT); // '' or '/chatbox'
 const DATABASE_URL = process.env.DATABASE_URL;
+const ADMIN_PHONE = (process.env.ADMIN_PHONE || '').trim();
+const SESSION_SECRET = process.env.SESSION_SECRET || 'chatbox-secret-key-32894723984723984';
 
-const DEFAULT_ROOM = 'general';
-const LIMITS = {
-  nameMin: 2,
-  nameMax: 24,
-  textMax: 1000,
-  maxRooms: 40,
-  historyLoad: 100, // messages sent to a client when it joins a room
-  historyKeep: 500, // messages kept per room
-  rateBurst: 6, // messages allowed in a burst ...
-  rateRefillMs: 1000, // ... then one more per second
-};
+const UPLOADS_DIR = path.join(__dirname, 'public', 'uploads');
+if (!fs.existsSync(UPLOADS_DIR)) {
+  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+}
+
+/* ---------------------------------------------------------------- database */
 
 let pool;
 if (DATABASE_URL && DATABASE_URL !== 'memory') {
   pool = new Pool({
     connectionString: DATABASE_URL,
-    max: 5,
+    max: 10,
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 5_000,
-    // Only needed when your PostgreSQL requires TLS (set PGSSL=true). Most LAN / same-network setups do not.
     ssl: process.env.PGSSL === 'true' ? { rejectUnauthorized: process.env.PGSSL_REJECT_UNAUTHORIZED !== 'false' } : undefined,
   });
   pool.on('error', (err) => console.error('postgres pool error:', err.message));
@@ -66,7 +61,6 @@ if (DATABASE_URL && DATABASE_URL !== 'memory') {
   );
   process.exit(1);
 } else {
-  // In development/testing without Docker or external DB, fall back to in-memory PostgreSQL emulator
   try {
     const { newDb } = require('pg-mem');
     const { Pool: MemPool } = newDb().adapters.createPg();
@@ -84,23 +78,62 @@ if (DATABASE_URL && DATABASE_URL !== 'memory') {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Tables are prefixed with "chat_" so they never collide with other apps sharing this database.
 async function initDatabase() {
   for (let attempt = 1; ; attempt++) {
     try {
       await pool.query(`
-        CREATE TABLE IF NOT EXISTS chat_rooms (
-          name       TEXT PRIMARY KEY,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        CREATE TABLE IF NOT EXISTS chat_users (
+          id             BIGSERIAL PRIMARY KEY,
+          phone          TEXT UNIQUE NOT NULL,
+          name           TEXT NOT NULL,
+          password_hash  TEXT NOT NULL,
+          avatar_color   INTEGER NOT NULL DEFAULT 0,
+          is_admin       BOOLEAN NOT NULL DEFAULT FALSE,
+          is_suspended   BOOLEAN NOT NULL DEFAULT FALSE,
+          created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
         );
+
+        CREATE TABLE IF NOT EXISTS chat_friends (
+          id             BIGSERIAL PRIMARY KEY,
+          user_id        BIGINT NOT NULL REFERENCES chat_users (id) ON DELETE CASCADE,
+          friend_id      BIGINT NOT NULL REFERENCES chat_users (id) ON DELETE CASCADE,
+          created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+          UNIQUE (user_id, friend_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS chat_conversations (
+          id             BIGSERIAL PRIMARY KEY,
+          type           TEXT NOT NULL, -- 'direct' or 'group'
+          name           TEXT,          -- group name
+          created_by     BIGINT REFERENCES chat_users (id) ON DELETE SET NULL,
+          created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+
+        CREATE TABLE IF NOT EXISTS chat_conversation_members (
+          conversation_id BIGINT NOT NULL REFERENCES chat_conversations (id) ON DELETE CASCADE,
+          user_id         BIGINT NOT NULL REFERENCES chat_users (id) ON DELETE CASCADE,
+          role            TEXT NOT NULL DEFAULT 'member', -- 'admin' or 'member'
+          joined_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+          PRIMARY KEY (conversation_id, user_id)
+        );
+
         CREATE TABLE IF NOT EXISTS chat_messages (
-          id         BIGSERIAL PRIMARY KEY,
-          room       TEXT NOT NULL REFERENCES chat_rooms (name) ON DELETE CASCADE,
-          username   TEXT NOT NULL,
-          body       TEXT NOT NULL,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+          id              BIGSERIAL PRIMARY KEY,
+          conversation_id BIGINT NOT NULL REFERENCES chat_conversations (id) ON DELETE CASCADE,
+          sender_id       BIGINT NOT NULL REFERENCES chat_users (id) ON DELETE CASCADE,
+          sender_name     TEXT NOT NULL,
+          body            TEXT NOT NULL DEFAULT '',
+          media_url       TEXT,
+          media_type      TEXT, -- 'image' or 'video'
+          media_name      TEXT,
+          is_deleted      BOOLEAN NOT NULL DEFAULT FALSE,
+          created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
         );
-        CREATE INDEX IF NOT EXISTS idx_chat_messages_room_id ON chat_messages (room, id DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_chat_messages_conv_id ON chat_messages (conversation_id, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_chat_conv_members_user ON chat_conversation_members (user_id);
+        CREATE INDEX IF NOT EXISTS idx_chat_friends_user ON chat_friends (user_id);
       `);
       break;
     } catch (err) {
@@ -109,94 +142,136 @@ async function initDatabase() {
       await sleep(2000);
     }
   }
-  await pool.query('INSERT INTO chat_rooms (name) VALUES ($1) ON CONFLICT DO NOTHING', [DEFAULT_ROOM]);
-  const { rows } = await pool.query('SELECT name FROM chat_rooms ORDER BY created_at, name');
-  roomNames = rows.map((r) => r.name);
 }
 
-// Room names are kept in memory too (rooms are few); this instance is the only writer.
-let roomNames = [];
+/* ------------------------------------------------------------- auth & crypto */
 
-async function ensureRoom(room) {
-  if (roomNames.includes(room)) return true;
-  if (roomNames.length >= LIMITS.maxRooms) return false;
-  await pool.query('INSERT INTO chat_rooms (name) VALUES ($1) ON CONFLICT DO NOTHING', [room]);
-  if (!roomNames.includes(room)) {
-    roomNames.push(room);
+function sanitizePhone(phone) {
+  if (typeof phone !== 'string') return '';
+  const cleaned = phone.trim().replace(/[^\d+]/g, '');
+  if (!cleaned) return '';
+  return cleaned;
+}
+
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password, stored) {
+  if (!password || !stored || !stored.includes(':')) return false;
+  const [salt, hash] = stored.split(':');
+  try {
+    const testHash = crypto.scryptSync(password, salt, 64).toString('hex');
+    return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(testHash, 'hex'));
+  } catch (err) {
+    return false;
   }
-  return true;
 }
 
-async function saveMessage(room, user, text) {
+function generateToken(userId) {
+  const payload = `${userId}:${Date.now()}`;
+  const sig = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('hex');
+  return Buffer.from(`${payload}:${sig}`).toString('base64url');
+}
+
+function parseToken(token) {
+  try {
+    const raw = Buffer.from(token, 'base64url').toString('utf8');
+    const [userId, ts, sig] = raw.split(':');
+    if (!userId || !ts || !sig) return null;
+    const payload = `${userId}:${ts}`;
+    const expectedSig = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('hex');
+    if (sig !== expectedSig) return null;
+    return Number(userId);
+  } catch (err) {
+    return null;
+  }
+}
+
+async function getUserById(id) {
+  if (!id) return null;
   const { rows } = await pool.query(
-    'INSERT INTO chat_messages (room, username, body) VALUES ($1, $2, $3) RETURNING id, created_at',
-    [room, user, text]
+    'SELECT id, phone, name, avatar_color, is_admin, is_suspended, created_at FROM chat_users WHERE id = $1',
+    [id]
   );
-  // Trim old history in the background; a failure here must never block chatting.
-  pool
-    .query(
-      'DELETE FROM chat_messages WHERE room = $1 AND id <= ' +
-        '(SELECT id FROM chat_messages WHERE room = $1 ORDER BY id DESC LIMIT 1 OFFSET $2)',
-      [room, LIMITS.historyKeep]
-    )
-    .catch((err) => console.error('history trim failed:', err.message));
-  return { id: Number(rows[0].id), room, user, text, ts: new Date(rows[0].created_at).getTime() };
+  if (!rows.length) return null;
+  const user = rows[0];
+  user.id = Number(user.id);
+  return user;
 }
 
-async function loadHistory(room) {
-  const { rows } = await pool.query(
-    'SELECT id, room, username, body, created_at FROM chat_messages WHERE room = $1 ORDER BY id DESC LIMIT $2',
-    [room, LIMITS.historyLoad]
-  );
-  return rows
-    .map((r) => ({
-      id: Number(r.id),
-      room: r.room,
-      user: r.username,
-      text: r.body,
-      ts: new Date(r.created_at).getTime(),
-    }))
-    .reverse();
+async function authMiddleware(req, res, next) {
+  const authHeader = req.headers.authorization;
+  let token = null;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.slice(7).trim();
+  } else if (req.headers.cookie) {
+    const match = req.headers.cookie.match(/chatbox_token=([^;]+)/);
+    if (match) token = match[1];
+  }
+
+  if (!token) {
+    return res.status(401).json({ ok: false, error: 'Authentication required' });
+  }
+
+  const userId = parseToken(token);
+  if (!userId) {
+    return res.status(401).json({ ok: false, error: 'Invalid or expired session' });
+  }
+
+  const user = await getUserById(userId);
+  if (!user) {
+    return res.status(401).json({ ok: false, error: 'User no longer exists' });
+  }
+
+  if (user.is_suspended) {
+    return res.status(403).json({ ok: false, error: 'Your account has been suspended by an administrator.' });
+  }
+
+  req.user = user;
+  next();
 }
 
-/* -------------------------------------------------------------- validation */
-
-const NAME_RE = /^[\p{L}\p{N}][\p{L}\p{M}\p{N} ._-]*$/u;
-const ROOM_RE = /^[a-z0-9][a-z0-9_-]{0,23}$/;
-// control characters (incl. NUL, which PostgreSQL rejects) and bidi overrides (used to spoof text direction)
-const UNSAFE_CHARS_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u202A-\u202E\u2066-\u2069]/g;
-
-function cleanName(value) {
-  if (typeof value !== 'string') return null;
-  const name = value.normalize('NFC').replace(UNSAFE_CHARS_RE, '').replace(/\s+/g, ' ').trim();
-  if (name.length < LIMITS.nameMin || name.length > LIMITS.nameMax) return null;
-  return NAME_RE.test(name) ? name : null;
+function adminMiddleware(req, res, next) {
+  if (!req.user || !req.user.is_admin) {
+    return res.status(403).json({ ok: false, error: 'Administrator access required' });
+  }
+  next();
 }
 
-function cleanRoom(value) {
-  if (typeof value !== 'string') return null;
-  const room = value.trim().toLowerCase().replace(/^#/, '').replace(/\s+/g, '-');
-  return ROOM_RE.test(room) ? room : null;
-}
+/* ------------------------------------------------------------- media upload */
 
-function cleanText(value) {
-  if (typeof value !== 'string') return null;
-  const text = value.replace(/\r\n?/g, '\n').replace(UNSAFE_CHARS_RE, '').trim();
-  return text && text.length <= LIMITS.textMax ? text : null;
-}
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, UPLOADS_DIR);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase() || '.bin';
+    const unique = `${Date.now()}-${crypto.randomBytes(8).toString('hex')}${ext}`;
+    cb(null, unique);
+  },
+});
 
-function takeToken(bucket) {
-  const now = Date.now();
-  bucket.tokens = Math.min(LIMITS.rateBurst, bucket.tokens + (now - bucket.last) / LIMITS.rateRefillMs);
-  bucket.last = now;
-  if (bucket.tokens < 1) return false;
-  bucket.tokens -= 1;
-  return true;
-}
+const upload = multer({
+  storage,
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
+  fileFilter: (req, file, cb) => {
+    const mime = file.mimetype.toLowerCase();
+    const isImage = mime.startsWith('image/');
+    const isVideo = mime.startsWith('video/');
+    if (isImage || isVideo) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only photo and video files are supported.'));
+    }
+  },
+});
 
 /* -------------------------------------------------------------------- http */
 
-const ASSET_VERSION = String(Date.now()); // cache-busts static files after every restart
+const ASSET_VERSION = String(Date.now());
 const indexHtml = fs
   .readFileSync(path.join(__dirname, 'views', 'index.html'), 'utf8')
   .replaceAll('{{BASE}}', PREFIX)
@@ -206,6 +281,8 @@ const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', true);
 
+app.use(express.json());
+
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
@@ -214,9 +291,10 @@ app.use((req, res, next) => {
     'Content-Security-Policy',
     [
       "default-src 'self'",
-      "script-src 'self'",
-      "style-src 'self'",
-      "img-src 'self' data:",
+      "script-src 'self' 'unsafe-inline'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob:",
+      "media-src 'self' data: blob:",
       "font-src 'self'",
       "connect-src 'self' ws: wss:",
       "object-src 'none'",
@@ -228,11 +306,13 @@ app.use((req, res, next) => {
   next();
 });
 
-app.get('/', (req, res) => {
-  res.set('Cache-Control', 'no-cache');
-  res.type('html').send(indexHtml);
-});
+// Serve static assets and uploaded media
+app.use('/static/uploads', express.static(UPLOADS_DIR, { index: false, maxAge: '30d' }));
+app.use('/static', express.static(path.join(__dirname, 'public'), { index: false, maxAge: '7d' }));
 
+/* --------------------------------------------------------------- API routes */
+
+// Healthcheck
 app.get('/healthz', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   try {
@@ -243,32 +323,751 @@ app.get('/healthz', async (req, res) => {
   }
 });
 
-app.use('/static', express.static(path.join(__dirname, 'public'), { index: false, maxAge: '7d' }));
+// Auth: Register
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const name = String(req.body.name || '').trim();
+    const phone = sanitizePhone(req.body.phone);
+    const password = String(req.body.password || '');
 
-app.use((req, res) => res.status(404).type('text').send('Not found'));
-// eslint-disable-next-line no-unused-vars
-app.use((err, req, res, next) => {
-  console.error('http error:', err);
-  res.status(500).type('text').send('Server error');
+    if (name.length < 2 || name.length > 50) {
+      return res.status(400).json({ ok: false, error: 'Name must be between 2 and 50 characters.' });
+    }
+    if (phone.length < 7 || phone.length > 16) {
+      return res.status(400).json({ ok: false, error: 'Please enter a valid phone number (7-16 digits).' });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ ok: false, error: 'Password must be at least 6 characters.' });
+    }
+
+    const existing = await pool.query('SELECT id FROM chat_users WHERE phone = $1', [phone]);
+    if (existing.rows.length > 0) {
+      return res.status(400).json({ ok: false, error: 'An account with this phone number already exists.' });
+    }
+
+    // Determine admin status: first user or matches ADMIN_PHONE
+    const userCountRes = await pool.query('SELECT count(*)::int as count FROM chat_users');
+    const isFirstUser = userCountRes.rows[0].count === 0;
+    const matchesAdminPhone = ADMIN_PHONE && phone === sanitizePhone(ADMIN_PHONE);
+    const isAdmin = Boolean(isFirstUser || matchesAdminPhone);
+
+    const hash = hashPassword(password);
+    const avatarColor = Math.floor(Math.random() * 10);
+
+    const insertRes = await pool.query(
+      `INSERT INTO chat_users (phone, name, password_hash, avatar_color, is_admin)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, phone, name, avatar_color, is_admin, created_at`,
+      [phone, name, hash, avatarColor, isAdmin]
+    );
+
+    const user = insertRes.rows[0];
+    user.id = Number(user.id);
+    const token = generateToken(user.id);
+
+    res.json({ ok: true, user, token });
+  } catch (err) {
+    console.error('Registration failed:', err);
+    res.status(500).json({ ok: false, error: 'Registration failed. Try again.' });
+  }
 });
 
+// Auth: Login
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const phone = sanitizePhone(req.body.phone);
+    const password = String(req.body.password || '');
+
+    if (!phone || !password) {
+      return res.status(400).json({ ok: false, error: 'Phone number and password are required.' });
+    }
+
+    const { rows } = await pool.query(
+      'SELECT id, phone, name, password_hash, avatar_color, is_admin, is_suspended, created_at FROM chat_users WHERE phone = $1',
+      [phone]
+    );
+
+    if (!rows.length || !verifyPassword(password, rows[0].password_hash)) {
+      return res.status(401).json({ ok: false, error: 'Incorrect phone number or password.' });
+    }
+
+    const user = rows[0];
+    user.id = Number(user.id);
+
+    if (user.is_suspended) {
+      return res.status(403).json({ ok: false, error: 'Your account has been suspended by an administrator.' });
+    }
+
+    delete user.password_hash;
+    const token = generateToken(user.id);
+
+    res.json({ ok: true, user, token });
+  } catch (err) {
+    console.error('Login failed:', err);
+    res.status(500).json({ ok: false, error: 'Login failed. Try again.' });
+  }
+});
+
+// Auth: Me
+app.get('/api/auth/me', authMiddleware, (req, res) => {
+  res.json({ ok: true, user: req.user });
+});
+
+// Friends: List
+app.get('/api/friends', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT u.id, u.phone, u.name, u.avatar_color, u.is_suspended
+       FROM chat_friends f
+       JOIN chat_users u ON f.friend_id = u.id
+       WHERE f.user_id = $1
+       ORDER BY u.name ASC`,
+      [req.user.id]
+    );
+
+    const friends = rows.map((u) => ({
+      id: Number(u.id),
+      phone: u.phone,
+      name: u.name,
+      avatarColor: u.avatar_color,
+      isOnline: onlineUsers.has(Number(u.id)),
+    }));
+
+    res.json({ ok: true, friends });
+  } catch (err) {
+    console.error('Fetch friends failed:', err);
+    res.status(500).json({ ok: false, error: 'Could not load friends.' });
+  }
+});
+
+// Friends: Add by phone
+app.post('/api/friends/add', authMiddleware, async (req, res) => {
+  try {
+    const phone = sanitizePhone(req.body.phone);
+    if (!phone) {
+      return res.status(400).json({ ok: false, error: 'Please enter a valid phone number.' });
+    }
+
+    if (phone === req.user.phone) {
+      return res.status(400).json({ ok: false, error: 'You cannot add yourself as a friend.' });
+    }
+
+    const { rows } = await pool.query(
+      'SELECT id, phone, name, avatar_color, is_suspended FROM chat_users WHERE phone = $1',
+      [phone]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ ok: false, error: 'No user registered with this phone number.' });
+    }
+
+    const friend = rows[0];
+    friend.id = Number(friend.id);
+
+    await pool.query(
+      'INSERT INTO chat_friends (user_id, friend_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+      [req.user.id, friend.id]
+    );
+
+    res.json({
+      ok: true,
+      friend: {
+        id: friend.id,
+        phone: friend.phone,
+        name: friend.name,
+        avatarColor: friend.avatar_color,
+        isOnline: onlineUsers.has(friend.id),
+      },
+    });
+  } catch (err) {
+    console.error('Add friend failed:', err);
+    res.status(500).json({ ok: false, error: 'Could not add friend.' });
+  }
+});
+
+// Conversations: List for current user
+app.get('/api/conversations', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT c.id, c.type, c.name, c.created_at, c.updated_at
+       FROM chat_conversations c
+       JOIN chat_conversation_members m ON c.id = m.conversation_id
+       WHERE m.user_id = $1
+       ORDER BY c.updated_at DESC`,
+      [req.user.id]
+    );
+
+    const conversations = [];
+    for (const conv of rows) {
+      const convId = Number(conv.id);
+      let displayName = conv.name;
+      let displayPhone = null;
+      let otherUserId = null;
+      let avatarColor = 0;
+      let isOnline = false;
+
+      if (conv.type === 'direct') {
+        const otherRes = await pool.query(
+          `SELECT u.id, u.name, u.phone, u.avatar_color
+           FROM chat_conversation_members m
+           JOIN chat_users u ON m.user_id = u.id
+           WHERE m.conversation_id = $1 AND m.user_id != $2
+           LIMIT 1`,
+          [convId, req.user.id]
+        );
+        if (otherRes.rows.length) {
+          const other = otherRes.rows[0];
+          otherUserId = Number(other.id);
+          displayName = other.name;
+          displayPhone = other.phone;
+          avatarColor = other.avatar_color;
+          isOnline = onlineUsers.has(otherUserId);
+        } else {
+          displayName = 'Direct Chat';
+        }
+      }
+
+      // Member count
+      const countRes = await pool.query(
+        'SELECT count(*)::int as count FROM chat_conversation_members WHERE conversation_id = $1',
+        [convId]
+      );
+      const memberCount = countRes.rows[0].count;
+
+      // Latest message
+      const lastMsgRes = await pool.query(
+        `SELECT body, media_type, sender_name, created_at, is_deleted
+         FROM chat_messages
+         WHERE conversation_id = $1 AND is_deleted = FALSE
+         ORDER BY id DESC LIMIT 1`,
+        [convId]
+      );
+      const lastMessage = lastMsgRes.rows.length
+        ? {
+            text: lastMsgRes.rows[0].media_type ? `[${lastMsgRes.rows[0].media_type}]` : lastMsgRes.rows[0].body,
+            senderName: lastMsgRes.rows[0].sender_name,
+            ts: new Date(lastMsgRes.rows[0].created_at).getTime(),
+          }
+        : null;
+
+      conversations.push({
+        id: convId,
+        type: conv.type,
+        name: displayName,
+        phone: displayPhone,
+        otherUserId,
+        avatarColor,
+        memberCount,
+        isOnline,
+        lastMessage,
+        updatedAt: new Date(conv.updated_at).getTime(),
+      });
+    }
+
+    res.json({ ok: true, conversations });
+  } catch (err) {
+    console.error('Fetch conversations failed:', err);
+    res.status(500).json({ ok: false, error: 'Could not load conversations.' });
+  }
+});
+
+// Conversations: Start or open Direct Chat
+app.post('/api/conversations/direct', authMiddleware, async (req, res) => {
+  try {
+    const phone = sanitizePhone(req.body.phone);
+    if (!phone) return res.status(400).json({ ok: false, error: 'Valid phone number required.' });
+
+    if (phone === req.user.phone) {
+      return res.status(400).json({ ok: false, error: 'Cannot start a direct chat with yourself.' });
+    }
+
+    const userRes = await pool.query(
+      'SELECT id, name, phone, avatar_color, is_suspended FROM chat_users WHERE phone = $1',
+      [phone]
+    );
+    if (!userRes.rows.length) {
+      return res.status(404).json({ ok: false, error: 'No user registered with this phone number.' });
+    }
+
+    const otherUser = userRes.rows[0];
+    const otherId = Number(otherUser.id);
+
+    // Check if direct conversation already exists
+    const existingRes = await pool.query(
+      `SELECT c.id
+       FROM chat_conversations c
+       JOIN chat_conversation_members m1 ON c.id = m1.conversation_id AND m1.user_id = $1
+       JOIN chat_conversation_members m2 ON c.id = m2.conversation_id AND m2.user_id = $2
+       WHERE c.type = 'direct'
+       LIMIT 1`,
+      [req.user.id, otherId]
+    );
+
+    let convId;
+    if (existingRes.rows.length > 0) {
+      convId = Number(existingRes.rows[0].id);
+    } else {
+      const createRes = await pool.query(
+        "INSERT INTO chat_conversations (type, created_by) VALUES ('direct', $1) RETURNING id",
+        [req.user.id]
+      );
+      convId = Number(createRes.rows[0].id);
+      await pool.query(
+        'INSERT INTO chat_conversation_members (conversation_id, user_id, role) VALUES ($1, $2, $3), ($1, $4, $5)',
+        [convId, req.user.id, 'member', otherId, 'member']
+      );
+    }
+
+    res.json({
+      ok: true,
+      conversation: {
+        id: convId,
+        type: 'direct',
+        name: otherUser.name,
+        phone: otherUser.phone,
+        otherUserId: otherId,
+        avatarColor: otherUser.avatar_color,
+        isOnline: onlineUsers.has(otherId),
+      },
+    });
+  } catch (err) {
+    console.error('Direct chat failed:', err);
+    res.status(500).json({ ok: false, error: 'Could not create direct chat.' });
+  }
+});
+
+// Conversations: Create Group Chat
+app.post('/api/conversations/group', authMiddleware, async (req, res) => {
+  try {
+    const name = String(req.body.name || '').trim();
+    const phones = Array.isArray(req.body.phones) ? req.body.phones : [];
+
+    if (name.length < 2 || name.length > 40) {
+      return res.status(400).json({ ok: false, error: 'Group name must be between 2 and 40 characters.' });
+    }
+
+    const createRes = await pool.query(
+      "INSERT INTO chat_conversations (type, name, created_by) VALUES ('group', $1, $2) RETURNING id, name, created_at",
+      [name, req.user.id]
+    );
+    const convId = Number(createRes.rows[0].id);
+
+    // Add creator as admin
+    await pool.query(
+      "INSERT INTO chat_conversation_members (conversation_id, user_id, role) VALUES ($1, $2, 'admin')",
+      [convId, req.user.id]
+    );
+
+    // Add member phones
+    for (const rawPhone of phones) {
+      const clean = sanitizePhone(rawPhone);
+      if (!clean || clean === req.user.phone) continue;
+      const uRes = await pool.query('SELECT id FROM chat_users WHERE phone = $1', [clean]);
+      if (uRes.rows.length) {
+        await pool.query(
+          "INSERT INTO chat_conversation_members (conversation_id, user_id, role) VALUES ($1, $2, 'member') ON CONFLICT DO NOTHING",
+          [convId, Number(uRes.rows[0].id)]
+        );
+      }
+    }
+
+    // Post system message
+    await pool.query(
+      'INSERT INTO chat_messages (conversation_id, sender_id, sender_name, body) VALUES ($1, $2, $3, $4)',
+      [convId, req.user.id, 'System', `${req.user.name} created group "${name}"`]
+    );
+
+    // Notify online users via socket
+    io.emit('conversation_created', { conversationId: convId });
+
+    res.json({
+      ok: true,
+      conversation: {
+        id: convId,
+        type: 'group',
+        name,
+        created_by: req.user.id,
+      },
+    });
+  } catch (err) {
+    console.error('Create group failed:', err);
+    res.status(500).json({ ok: false, error: 'Could not create group chat.' });
+  }
+});
+
+// Conversations: Add Member to Group
+app.post('/api/conversations/:id/members', authMiddleware, async (req, res) => {
+  try {
+    const convId = Number(req.params.id);
+    const phone = sanitizePhone(req.body.phone);
+
+    if (!phone) return res.status(400).json({ ok: false, error: 'Valid phone number required.' });
+
+    // Check if requester is a member of the group
+    const memberCheck = await pool.query(
+      'SELECT role FROM chat_conversation_members WHERE conversation_id = $1 AND user_id = $2',
+      [convId, req.user.id]
+    );
+    if (!memberCheck.rows.length) {
+      return res.status(403).json({ ok: false, error: 'You are not a member of this conversation.' });
+    }
+
+    const userRes = await pool.query(
+      'SELECT id, name, phone, avatar_color FROM chat_users WHERE phone = $1',
+      [phone]
+    );
+    if (!userRes.rows.length) {
+      return res.status(404).json({ ok: false, error: 'No user registered with this phone number.' });
+    }
+
+    const newUser = userRes.rows[0];
+    const newUserId = Number(newUser.id);
+
+    const alreadyMember = await pool.query(
+      'SELECT user_id FROM chat_conversation_members WHERE conversation_id = $1 AND user_id = $2',
+      [convId, newUserId]
+    );
+    if (alreadyMember.rows.length) {
+      return res.status(400).json({ ok: false, error: 'User is already a member of this group.' });
+    }
+
+    await pool.query(
+      "INSERT INTO chat_conversation_members (conversation_id, user_id, role) VALUES ($1, $2, 'member')",
+      [convId, newUserId]
+    );
+
+    // System message
+    const sysMsgRes = await pool.query(
+      'INSERT INTO chat_messages (conversation_id, sender_id, sender_name, body) VALUES ($1, $2, $3, $4) RETURNING id, created_at',
+      [convId, req.user.id, 'System', `${req.user.name} added ${newUser.name} to the group`]
+    );
+
+    io.to(`c:${convId}`).emit('message', {
+      id: Number(sysMsgRes.rows[0].id),
+      conversationId: convId,
+      senderId: req.user.id,
+      senderName: 'System',
+      text: `${req.user.name} added ${newUser.name} to the group`,
+      ts: new Date(sysMsgRes.rows[0].created_at).getTime(),
+      isSystem: true,
+    });
+
+    // Notify the added user directly to refresh their list
+    io.to(`u:${newUserId}`).emit('conversation_added', { conversationId: convId });
+
+    res.json({ ok: true, addedUser: { id: newUserId, name: newUser.name, phone: newUser.phone } });
+  } catch (err) {
+    console.error('Add member failed:', err);
+    res.status(500).json({ ok: false, error: 'Could not add member.' });
+  }
+});
+
+// Conversations: Get Members
+app.get('/api/conversations/:id/members', authMiddleware, async (req, res) => {
+  try {
+    const convId = Number(req.params.id);
+    const { rows } = await pool.query(
+      `SELECT u.id, u.name, u.phone, u.avatar_color, m.role, m.joined_at
+       FROM chat_conversation_members m
+       JOIN chat_users u ON m.user_id = u.id
+       WHERE m.conversation_id = $1
+       ORDER BY m.role DESC, u.name ASC`,
+      [convId]
+    );
+
+    const members = rows.map((u) => ({
+      id: Number(u.id),
+      name: u.name,
+      phone: u.phone,
+      avatarColor: u.avatar_color,
+      role: u.role,
+      isOnline: onlineUsers.has(Number(u.id)),
+    }));
+
+    res.json({ ok: true, members });
+  } catch (err) {
+    console.error('Get members failed:', err);
+    res.status(500).json({ ok: false, error: 'Could not load group members.' });
+  }
+});
+
+// Messages: Load History for Conversation
+app.get('/api/conversations/:id/messages', authMiddleware, async (req, res) => {
+  try {
+    const convId = Number(req.params.id);
+
+    // Verify membership
+    const memberCheck = await pool.query(
+      'SELECT 1 FROM chat_conversation_members WHERE conversation_id = $1 AND user_id = $2',
+      [convId, req.user.id]
+    );
+    if (!memberCheck.rows.length) {
+      return res.status(403).json({ ok: false, error: 'You are not a member of this conversation.' });
+    }
+
+    const { rows } = await pool.query(
+      `SELECT id, conversation_id, sender_id, sender_name, body, media_url, media_type, media_name, created_at
+       FROM chat_messages
+       WHERE conversation_id = $1 AND is_deleted = FALSE
+       ORDER BY id DESC LIMIT 100`,
+      [convId]
+    );
+
+    const messages = rows
+      .map((r) => ({
+        id: Number(r.id),
+        conversationId: Number(r.conversation_id),
+        senderId: Number(r.sender_id),
+        senderName: r.sender_name,
+        text: r.body,
+        mediaUrl: r.media_url,
+        mediaType: r.media_type,
+        mediaName: r.media_name,
+        ts: new Date(r.created_at).getTime(),
+      }))
+      .reverse();
+
+    res.json({ ok: true, messages });
+  } catch (err) {
+    console.error('Load messages failed:', err);
+    res.status(500).json({ ok: false, error: 'Could not load messages.' });
+  }
+});
+
+// Media: Upload Photo / Video
+app.post('/api/upload', authMiddleware, upload.single('media'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ ok: false, error: 'No media file provided.' });
+  }
+
+  const mime = req.file.mimetype.toLowerCase();
+  const isVideo = mime.startsWith('video/');
+  const mediaType = isVideo ? 'video' : 'image';
+  const url = `${PREFIX}/static/uploads/${req.file.filename}`;
+
+  res.json({
+    ok: true,
+    url,
+    mediaType,
+    mediaName: req.file.originalname,
+    size: req.file.size,
+  });
+});
+
+// Messages: Soft Delete
+app.delete('/api/messages/:id', authMiddleware, async (req, res) => {
+  try {
+    const msgId = Number(req.params.id);
+    const { rows } = await pool.query(
+      'SELECT id, conversation_id, sender_id, is_deleted FROM chat_messages WHERE id = $1',
+      [msgId]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ ok: false, error: 'Message not found.' });
+    }
+
+    const msg = rows[0];
+    const isOwner = Number(msg.sender_id) === req.user.id;
+    if (!isOwner && !req.user.is_admin) {
+      return res.status(403).json({ ok: false, error: 'You can only delete your own messages.' });
+    }
+
+    // Soft delete: marks is_deleted = TRUE (Preserved for admin audit!)
+    await pool.query('UPDATE chat_messages SET is_deleted = TRUE WHERE id = $1', [msgId]);
+
+    // Broadcast deletion in real time to conversation
+    io.to(`c:${msg.conversation_id}`).emit('message_deleted', {
+      id: msgId,
+      conversationId: Number(msg.conversation_id),
+    });
+
+    res.json({ ok: true, id: msgId });
+  } catch (err) {
+    console.error('Delete message failed:', err);
+    res.status(500).json({ ok: false, error: 'Could not delete message.' });
+  }
+});
+
+/* ------------------------------------------------------------- Admin routes */
+
+// Admin: Stats
+app.get('/api/admin/stats', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const usersRes = await pool.query('SELECT count(*)::int as count FROM chat_users');
+    const messagesRes = await pool.query('SELECT count(*)::int as count FROM chat_messages');
+    const deletedRes = await pool.query('SELECT count(*)::int as count FROM chat_messages WHERE is_deleted = TRUE');
+    const groupsRes = await pool.query("SELECT count(*)::int as count FROM chat_conversations WHERE type = 'group'");
+    const directsRes = await pool.query("SELECT count(*)::int as count FROM chat_conversations WHERE type = 'direct'");
+
+    res.json({
+      ok: true,
+      stats: {
+        totalUsers: usersRes.rows[0].count,
+        activeUsersOnline: onlineUsers.size,
+        totalMessages: messagesRes.rows[0].count,
+        deletedMessages: deletedRes.rows[0].count,
+        totalGroups: groupsRes.rows[0].count,
+        totalDirectChats: directsRes.rows[0].count,
+      },
+    });
+  } catch (err) {
+    console.error('Admin stats error:', err);
+    res.status(500).json({ ok: false, error: 'Could not load admin stats.' });
+  }
+});
+
+// Admin: List all registered users
+app.get('/api/admin/users', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT u.id, u.phone, u.name, u.avatar_color, u.is_admin, u.is_suspended, u.created_at,
+             count(m.id)::int as message_count
+      FROM chat_users u
+      LEFT JOIN chat_messages m ON u.id = m.sender_id
+      GROUP BY u.id
+      ORDER BY u.id DESC
+    `);
+
+    const users = rows.map((u) => ({
+      id: Number(u.id),
+      phone: u.phone,
+      name: u.name,
+      avatarColor: u.avatar_color,
+      isAdmin: u.is_admin,
+      isSuspended: u.is_suspended,
+      messageCount: u.message_count,
+      isOnline: onlineUsers.has(Number(u.id)),
+      createdAt: new Date(u.created_at).getTime(),
+    }));
+
+    res.json({ ok: true, users });
+  } catch (err) {
+    console.error('Admin list users error:', err);
+    res.status(500).json({ ok: false, error: 'Could not load users.' });
+  }
+});
+
+// Admin: Block / Suspend / Unsuspend user
+app.post('/api/admin/users/:id/suspend', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const targetId = Number(req.params.id);
+    const suspend = Boolean(req.body.suspend);
+
+    if (targetId === req.user.id) {
+      return res.status(400).json({ ok: false, error: 'You cannot suspend your own account.' });
+    }
+
+    await pool.query('UPDATE chat_users SET is_suspended = $1 WHERE id = $2', [suspend, targetId]);
+
+    if (suspend) {
+      // Disconnect any active sockets for this user immediately
+      for (const [socketId, socket] of io.sockets.sockets) {
+        if (socket.user && socket.user.id === targetId) {
+          socket.emit('account_suspended');
+          socket.disconnect(true);
+        }
+      }
+      onlineUsers.delete(targetId);
+    }
+
+    res.json({ ok: true, targetId, suspended: suspend });
+  } catch (err) {
+    console.error('Admin suspend error:', err);
+    res.status(500).json({ ok: false, error: 'Could not change user status.' });
+  }
+});
+
+// Admin: List all conversations for audit
+app.get('/api/admin/conversations', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT c.id, c.type, c.name, c.created_at, c.updated_at,
+             count(DISTINCT m.user_id)::int as member_count,
+             count(msg.id)::int as total_messages,
+             count(CASE WHEN msg.is_deleted = TRUE THEN 1 END)::int as deleted_messages
+      FROM chat_conversations c
+      LEFT JOIN chat_conversation_members m ON c.id = m.conversation_id
+      LEFT JOIN chat_messages msg ON c.id = msg.conversation_id
+      GROUP BY c.id
+      ORDER BY c.updated_at DESC
+    `);
+
+    const conversations = rows.map((c) => ({
+      id: Number(c.id),
+      type: c.type,
+      name: c.name || `Direct Chat #${c.id}`,
+      memberCount: c.member_count,
+      totalMessages: c.total_messages,
+      deletedMessages: c.deleted_messages,
+      updatedAt: new Date(c.updated_at).getTime(),
+    }));
+
+    res.json({ ok: true, conversations });
+  } catch (err) {
+    console.error('Admin conversations error:', err);
+    res.status(500).json({ ok: false, error: 'Could not load conversations.' });
+  }
+});
+
+// Admin: Full conversation audit log (includes all messages even if deleted by users!)
+app.get('/api/admin/conversations/:id/audit', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const convId = Number(req.params.id);
+    const { rows } = await pool.query(
+      `SELECT m.id, m.conversation_id, m.sender_id, m.sender_name, u.phone as sender_phone,
+              m.body, m.media_url, m.media_type, m.media_name, m.is_deleted, m.created_at
+       FROM chat_messages m
+       LEFT JOIN chat_users u ON m.sender_id = u.id
+       WHERE m.conversation_id = $1
+       ORDER BY m.id ASC`,
+      [convId]
+    );
+
+    const messages = rows.map((r) => ({
+      id: Number(r.id),
+      conversationId: Number(r.conversation_id),
+      senderId: Number(r.sender_id),
+      senderName: r.sender_name,
+      senderPhone: r.sender_phone,
+      text: r.body,
+      mediaUrl: r.media_url,
+      mediaType: r.media_type,
+      mediaName: r.media_name,
+      isDeleted: Boolean(r.is_deleted),
+      ts: new Date(r.created_at).getTime(),
+    }));
+
+    res.json({ ok: true, messages });
+  } catch (err) {
+    console.error('Admin audit log error:', err);
+    res.status(500).json({ ok: false, error: 'Could not load audit log.' });
+  }
+});
+
+// Page HTML
+app.get('/', (req, res) => {
+  res.set('Cache-Control', 'no-cache');
+  res.type('html').send(indexHtml);
+});
+
+app.use((req, res) => res.status(404).type('text').send('Not found'));
+
 const server = http.createServer(app);
-// Behind Traefik: keep idle connections open longer than the proxy does, which avoids sporadic 502s.
 server.keepAliveTimeout = 120_000;
 server.headersTimeout = 121_000;
 
 /* ---------------------------------------------------------------- realtime */
 
 const io = new Server(server, {
-  path: '/socket.io', // internal path; the prefix is stripped below before Socket.IO sees a request
-  maxHttpBufferSize: 16 * 1024,
+  path: '/socket.io',
+  maxHttpBufferSize: 16 * 1024 * 1024, // 16MB for live packets
   pingInterval: 25_000,
   pingTimeout: 20_000,
   connectTimeout: 15_000,
 });
 
-// Remove the subpath from req.url if the proxy did not already do it. Prepended so it runs before
-// Express and Socket.IO/engine.io look at the URL, for normal requests and WebSocket upgrades alike.
+// Subpath stripper middleware for Traefik proxy compatibility
 function stripPrefix(req) {
   if (!PREFIX) return;
   const url = req.url || '/';
@@ -279,164 +1078,154 @@ function stripPrefix(req) {
 server.prependListener('request', stripPrefix);
 server.prependListener('upgrade', stripPrefix);
 
-const roomKey = (room) => `r:${room}`;
-const byName = (a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' });
+const onlineUsers = new Set(); // Set of userIds currently online
 
-function presence(room) {
-  const ids = io.sockets.adapter.rooms.get(roomKey(room));
-  const names = new Set();
-  if (ids) {
-    for (const id of ids) {
-      const s = io.sockets.sockets.get(id);
-      if (s && s.data.name) names.add(s.data.name);
+// Socket authentication middleware
+io.use(async (socket, next) => {
+  const token = socket.handshake.auth && socket.handshake.auth.token;
+  if (!token) return next(new Error('Authentication token required'));
+
+  const userId = parseToken(token);
+  if (!userId) return next(new Error('Invalid token'));
+
+  const user = await getUserById(userId);
+  if (!user) return next(new Error('User not found'));
+  if (user.is_suspended) return next(new Error('Account suspended'));
+
+  socket.user = user;
+  next();
+});
+
+io.on('connection', async (socket) => {
+  const user = socket.user;
+  onlineUsers.add(user.id);
+
+  // Private room for notifications addressed to this user
+  socket.join(`u:${user.id}`);
+  io.emit('user_status', { userId: user.id, isOnline: true });
+
+  // Join all conversation rooms the user is already part of
+  try {
+    const { rows } = await pool.query(
+      'SELECT conversation_id FROM chat_conversation_members WHERE user_id = $1',
+      [user.id]
+    );
+    for (const r of rows) {
+      socket.join(`c:${r.conversation_id}`);
     }
+  } catch (err) {
+    console.error('Socket join rooms error:', err);
   }
-  return names;
-}
 
-function emitPresence(room) {
-  io.to(roomKey(room)).emit('presence', { room, users: [...presence(room)].sort(byName) });
-}
-
-function roomsSnapshot() {
-  return roomNames.map((name) => ({
-    name,
-    online: (io.sockets.adapter.rooms.get(roomKey(name)) || { size: 0 }).size,
-  }));
-}
-
-function emitRooms() {
-  io.emit('rooms', roomsSnapshot());
-}
-
-function leaveCurrentRoom(socket) {
-  const { name, room } = socket.data;
-  if (!room) return;
-  socket.leave(roomKey(room));
-  socket.data.room = null;
-  io.to(roomKey(room)).emit('typing', { room, user: name, typing: false });
-  if (name && !presence(room).has(name)) {
-    io.to(roomKey(room)).emit('system', { room, text: `${name} left`, ts: Date.now() });
-  }
-  emitPresence(room);
-}
-
-// Join and message handlers await the database. Running them one at a time per socket keeps
-// messages in order and stops two quick room switches from interleaving.
-function enqueue(socket, task) {
-  socket.data.queue = socket.data.queue.then(task).catch((err) => console.error('socket task failed:', err));
-}
-
-io.on('connection', (socket) => {
-  socket.data = {
-    name: null,
-    room: null,
-    bucket: { tokens: LIMITS.rateBurst, last: Date.now() },
-    lastTyping: 0,
-    queue: Promise.resolve(),
-  };
-
-  socket.on('join', (payload, ack) => {
+  // Join a specific conversation
+  socket.on('join_conversation', async ({ conversationId }, ack) => {
     const reply = typeof ack === 'function' ? ack : () => {};
-    const name = cleanName(payload && payload.name);
-    const room = cleanRoom(payload && payload.room);
-    if (!name) {
-      return reply({
-        ok: false,
-        code: 'name',
-        error: `Names need ${LIMITS.nameMin}–${LIMITS.nameMax} characters: letters, numbers, spaces, dots, dashes or underscores.`,
-      });
+    const convId = Number(conversationId);
+    if (!convId) return reply({ ok: false, error: 'Invalid conversation' });
+
+    try {
+      const memberCheck = await pool.query(
+        'SELECT 1 FROM chat_conversation_members WHERE conversation_id = $1 AND user_id = $2',
+        [convId, user.id]
+      );
+      if (!memberCheck.rows.length) {
+        return reply({ ok: false, error: 'Not a member of this conversation' });
+      }
+
+      socket.join(`c:${convId}`);
+      reply({ ok: true });
+    } catch (err) {
+      reply({ ok: false, error: 'Join failed' });
     }
-    if (!room) {
-      return reply({
-        ok: false,
-        code: 'room',
-        error: 'Room names use 1–24 lowercase letters, numbers, dashes or underscores.',
-      });
-    }
+  });
 
-    enqueue(socket, async () => {
-      try {
-        if (!(await ensureRoom(room))) {
-          return reply({
-            ok: false,
-            code: 'limit',
-            error: `This server supports up to ${LIMITS.maxRooms} rooms. Join an existing one.`,
-          });
-        }
-        if (socket.disconnected) return;
+  // Send message
+  socket.on('message', async (payload, ack) => {
+    const reply = typeof ack === 'function' ? ack : () => {};
+    const convId = Number(payload && payload.conversationId);
+    const text = String((payload && payload.text) || '').trim();
+    const mediaUrl = payload && payload.mediaUrl ? String(payload.mediaUrl) : null;
+    const mediaType = payload && payload.mediaType ? String(payload.mediaType) : null;
+    const mediaName = payload && payload.mediaName ? String(payload.mediaName) : null;
 
-        if (socket.data.room !== room || socket.data.name !== name) {
-          leaveCurrentRoom(socket);
-          socket.data.name = name;
-          socket.data.room = room;
-          const alreadyHere = presence(room).has(name);
-          // Join the live room first, then read history: the client queues anything that arrives in
-          // between and de-duplicates it by id, so no message can fall through the gap.
-          socket.join(roomKey(room));
-          if (!alreadyHere) {
-            socket.to(roomKey(room)).emit('system', { room, text: `${name} joined`, ts: Date.now() });
-          }
-          emitPresence(room);
-          emitRooms();
-        }
+    if (!convId) return reply({ ok: false, error: 'Invalid conversation.' });
+    if (!text && !mediaUrl) return reply({ ok: false, error: 'Message cannot be empty.' });
 
-        const history = await loadHistory(room);
-        if (socket.disconnected) return;
-        reply({
-          ok: true,
-          name,
-          room,
-          history,
-          users: [...presence(room)].sort(byName),
-          rooms: roomsSnapshot(),
+    try {
+      // Verify membership
+      const memberCheck = await pool.query(
+        'SELECT 1 FROM chat_conversation_members WHERE conversation_id = $1 AND user_id = $2',
+        [convId, user.id]
+      );
+      if (!memberCheck.rows.length) {
+        return reply({ ok: false, error: 'Not a member of this conversation.' });
+      }
+
+      // Save message
+      const msgRes = await pool.query(
+        `INSERT INTO chat_messages (conversation_id, sender_id, sender_name, body, media_url, media_type, media_name)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id, created_at`,
+        [convId, user.id, user.name, text, mediaUrl, mediaType, mediaName]
+      );
+
+      const msg = {
+        id: Number(msgRes.rows[0].id),
+        conversationId: convId,
+        senderId: user.id,
+        senderName: user.name,
+        text,
+        mediaUrl,
+        mediaType,
+        mediaName,
+        ts: new Date(msgRes.rows[0].created_at).getTime(),
+      };
+
+      // Update conversation updated_at
+      await pool.query('UPDATE chat_conversations SET updated_at = now() WHERE id = $1', [convId]);
+
+      // Broadcast to all sockets currently viewing this conversation room
+      io.to(`c:${convId}`).emit('message', msg);
+
+      // Also notify members' user rooms for live sidebar updates & browser notification
+      const members = await pool.query(
+        'SELECT user_id FROM chat_conversation_members WHERE conversation_id = $1',
+        [convId]
+      );
+      for (const m of members.rows) {
+        io.to(`u:${m.user_id}`).emit('conversation_updated', {
+          conversationId: convId,
+          lastMessage: {
+            text: mediaType ? `[${mediaType}]` : text,
+            senderName: user.name,
+            ts: msg.ts,
+          },
         });
-      } catch (err) {
-        console.error('join failed:', err);
-        reply({ ok: false, code: 'server', error: 'Something went wrong on the server. Try again.' });
       }
+
+      reply({ ok: true, id: msg.id });
+    } catch (err) {
+      console.error('Socket message failed:', err);
+      reply({ ok: false, error: 'Failed to send message.' });
+    }
+  });
+
+  // Typing
+  socket.on('typing', ({ conversationId, typing }) => {
+    const convId = Number(conversationId);
+    if (!convId) return;
+    socket.to(`c:${convId}`).emit('typing', {
+      conversationId: convId,
+      userId: user.id,
+      userName: user.name,
+      typing: Boolean(typing),
     });
   });
 
-  socket.on('message', (payload, ack) => {
-    const reply = typeof ack === 'function' ? ack : () => {};
-    if (!socket.data.name || !socket.data.room) {
-      return reply({ ok: false, error: 'Join a room before sending messages.' });
-    }
-    if (!takeToken(socket.data.bucket)) {
-      return reply({ ok: false, error: 'You are sending messages too fast. Wait a moment.' });
-    }
-    const text = cleanText(payload && payload.text);
-    if (!text) {
-      return reply({ ok: false, error: `Messages need 1–${LIMITS.textMax} characters.` });
-    }
-
-    enqueue(socket, async () => {
-      const { name, room } = socket.data;
-      if (!name || !room) return reply({ ok: false, error: 'Join a room before sending messages.' });
-      try {
-        const message = await saveMessage(room, name, text);
-        io.to(roomKey(room)).emit('message', message);
-        reply({ ok: true });
-      } catch (err) {
-        console.error('message failed:', err);
-        reply({ ok: false, error: 'The message could not be saved. Try again.' });
-      }
-    });
-  });
-
-  socket.on('typing', (isTyping) => {
-    const { name, room } = socket.data;
-    if (!name || !room) return;
-    const now = Date.now();
-    if (isTyping && now - socket.data.lastTyping < 800) return;
-    socket.data.lastTyping = now;
-    socket.to(roomKey(room)).emit('typing', { room, user: name, typing: Boolean(isTyping) });
-  });
-
+  // Disconnect
   socket.on('disconnect', () => {
-    leaveCurrentRoom(socket);
-    emitRooms();
+    onlineUsers.delete(user.id);
+    io.emit('user_status', { userId: user.id, isOnline: false });
   });
 });
 
@@ -468,7 +1257,13 @@ function startServer() {
         server.listen(PORT, HOST, () => {
           console.log(`chatbox listening on http://${HOST}:${PORT}${PREFIX || '/'}`);
           console.log(`  prefix: ${PREFIX || '(none, serving from root)'}`);
-          console.log(`  database: ${DATABASE_URL && DATABASE_URL !== 'memory' ? 'postgres (connected)' : 'in-memory postgres (pg-mem)'}`);
+          console.log(
+            `  database: ${
+              DATABASE_URL && DATABASE_URL !== 'memory'
+                ? 'postgres (connected)'
+                : 'in-memory postgres (pg-mem)'
+            }`
+          );
           resolve(server);
         });
       });
@@ -491,9 +1286,11 @@ module.exports = {
   initDatabase,
   startServer,
   stripPrefix,
-  ensureRoom,
-  saveMessage,
-  loadHistory,
+  hashPassword,
+  verifyPassword,
+  generateToken,
+  parseToken,
+  sanitizePhone,
   PREFIX,
   PORT,
 };

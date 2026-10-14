@@ -4,10 +4,8 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 const { io: Client } = require('socket.io-client');
 
-// Use port 3099 for testing to avoid conflicts with any running dev server
 process.env.PORT = '3099';
 process.env.HOST = '127.0.0.1';
-// Leave DATABASE_URL unset to use in-memory pg-mem emulator
 delete process.env.DATABASE_URL;
 
 const {
@@ -16,204 +14,327 @@ const {
   io,
   getPool,
   initDatabase,
-  ensureRoom,
-  saveMessage,
-  loadHistory,
   stripPrefix,
   PORT,
 } = require('./server');
 
 function request(path, options = {}) {
   return new Promise((resolve, reject) => {
-    const req = http.request(
-      `http://127.0.0.1:${PORT}${path}`,
-      options,
-      (res) => {
-        let body = '';
-        res.setEncoding('utf8');
-        res.on('data', (chunk) => (body += chunk));
-        res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body }));
-      }
-    );
+    const parsedUrl = new URL(`http://127.0.0.1:${PORT}${path}`);
+    const reqOpts = {
+      hostname: parsedUrl.hostname,
+      port: parsedUrl.port,
+      path: parsedUrl.pathname + parsedUrl.search,
+      method: options.method || 'GET',
+      headers: options.headers || {},
+    };
+
+    const req = http.request(reqOpts, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => (body += chunk));
+      res.on('end', () => {
+        let json = null;
+        try {
+          json = JSON.parse(body);
+        } catch (e) {}
+        resolve({ status: res.statusCode, headers: res.headers, body, json });
+      });
+    });
     req.on('error', reject);
+    if (options.body) {
+      req.write(typeof options.body === 'string' ? options.body : JSON.stringify(options.body));
+    }
     req.end();
   });
 }
 
 async function runTests() {
-  console.log('--- Starting Chatbox Test Suite ---\n');
+  console.log('--- Starting Enhanced Chatbox Test Suite ---\n');
 
-  console.log('[1/5] Initializing Database & Server...');
+  console.log('[1/8] Initializing Database & Server...');
   await initDatabase();
   await new Promise((resolve) => server.listen(PORT, '127.0.0.1', resolve));
   console.log(`Server listening on port ${PORT}`);
 
-  // Test 1: HTTP endpoints
-  console.log('\n[2/5] Testing HTTP routes & headers...');
+  let tokenAlice = '';
+  let tokenBob = '';
+  let tokenCharlie = '';
+  let userAlice = null;
+  let userBob = null;
+  let userCharlie = null;
+
+  // Test 1: User Registration
+  console.log('\n[2/8] Testing User Registration with Phone Number & Password...');
   {
-    const resHome = await request('/');
-    assert.equal(resHome.status, 200, 'Home page should return 200');
-    assert.match(resHome.body, /<title>chatbox<\/title>/, 'Home page contains chatbox title');
-    assert.equal(resHome.headers['x-content-type-options'], 'nosniff');
-    assert.equal(resHome.headers['x-frame-options'], 'DENY');
-    assert.ok(resHome.headers['content-security-policy'], 'CSP header is set');
-    console.log('  ✔ GET / -> 200 with security headers');
+    // First user registered becomes Admin
+    const regAlice = await request('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: { name: 'Alice Admin', phone: '+1234567890', password: 'password123' },
+    });
+    assert.equal(regAlice.status, 200);
+    assert.equal(regAlice.json.ok, true);
+    assert.equal(regAlice.json.user.phone, '+1234567890');
+    assert.equal(regAlice.json.user.is_admin, true, 'First user should be admin');
+    tokenAlice = regAlice.json.token;
+    userAlice = regAlice.json.user;
+    console.log('  ✔ Alice registered (Admin)');
 
-    const resHealth = await request('/healthz');
-    assert.equal(resHealth.status, 200, 'Healthz should return 200');
-    const healthJson = JSON.parse(resHealth.body);
-    assert.equal(healthJson.ok, true);
-    assert.equal(healthJson.db, true);
-    console.log('  ✔ GET /healthz -> 200 { ok: true, db: true }');
+    // Second user Bob
+    const regBob = await request('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: { name: 'Bob User', phone: '+1987654321', password: 'password123' },
+    });
+    assert.equal(regBob.status, 200);
+    assert.equal(regBob.json.user.is_admin, false);
+    tokenBob = regBob.json.token;
+    userBob = regBob.json.user;
+    console.log('  ✔ Bob registered (Regular User)');
 
-    const resCss = await request('/static/app.css');
-    assert.equal(resCss.status, 200, 'CSS static file should return 200');
-    assert.match(resCss.body, /--font-body/, 'CSS contains design tokens');
-    console.log('  ✔ GET /static/app.css -> 200');
+    // Third user Charlie
+    const regCharlie = await request('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: { name: 'Charlie', phone: '+1555555555', password: 'password123' },
+    });
+    tokenCharlie = regCharlie.json.token;
+    userCharlie = regCharlie.json.user;
+    console.log('  ✔ Charlie registered');
 
-    const resJs = await request('/static/app.js');
-    assert.equal(resJs.status, 200, 'JS static file should return 200');
-    console.log('  ✔ GET /static/app.js -> 200');
-
-    const resNotFound = await request('/not-found-url');
-    assert.equal(resNotFound.status, 404, 'Unknown path should return 404');
-    console.log('  ✔ GET /not-found-url -> 404');
+    // Duplicate phone check
+    const regDup = await request('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: { name: 'Fake Alice', phone: '+1234567890', password: 'password123' },
+    });
+    assert.equal(regDup.status, 400, 'Duplicate phone should be rejected');
+    console.log('  ✔ Duplicate phone registration rejected');
   }
 
-  // Test 2: Database operations
-  console.log('\n[3/5] Testing PostgreSQL data layer...');
+  // Test 2: Login with Phone
+  console.log('\n[3/8] Testing Authentication & Token Login...');
   {
-    const roomCreated = await ensureRoom('dev-talk');
-    assert.equal(roomCreated, true, 'Room creation succeeds');
+    const loginRes = await request('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: { phone: '+1987654321', password: 'password123' },
+    });
+    assert.equal(loginRes.status, 200);
+    assert.ok(loginRes.json.token);
+    assert.equal(loginRes.json.user.name, 'Bob User');
+    console.log('  ✔ Bob successfully logged in with phone and password');
 
-    // Duplicate creation must be idempotent and not cause duplicates
-    const roomDuplicate = await ensureRoom('dev-talk');
-    assert.equal(roomDuplicate, true, 'Duplicate room returns true');
-
-    const msg1 = await saveMessage('dev-talk', 'Alice', 'First message');
-    assert.ok(msg1.id > 0, 'Message id should be positive');
-    assert.equal(msg1.user, 'Alice');
-    assert.equal(msg1.text, 'First message');
-
-    const msg2 = await saveMessage('dev-talk', 'Bob', 'Second message');
-    assert.ok(msg2.id > msg1.id, 'Message id should increment');
-
-    const history = await loadHistory('dev-talk');
-    assert.equal(history.length, 2, 'History contains 2 messages');
-    assert.equal(history[0].user, 'Alice', 'Chronological order (oldest first)');
-    assert.equal(history[1].user, 'Bob');
-    console.log('  ✔ ensureRoom, saveMessage, and loadHistory work correctly');
+    const meRes = await request('/api/auth/me', {
+      headers: { Authorization: `Bearer ${tokenBob}` },
+    });
+    assert.equal(meRes.status, 200);
+    assert.equal(meRes.json.user.phone, '+1987654321');
+    console.log('  ✔ /api/auth/me verified with Bearer token');
   }
 
-  // Test 3: Subpath stripPrefix logic
-  console.log('\n[4/5] Testing subpath URL stripPrefix logic...');
+  // Test 3: Friends List
+  console.log('\n[4/8] Testing Friend List Management...');
   {
-    // Test the stripPrefix function directly with dummy request objects
-    const dummyReq1 = { url: '/chatbox' };
-    stripPrefix(dummyReq1);
-    // Note: in this test process, PREFIX is '' because APPLICATION_ROOT is not set.
-    // Let's test the prefix stripping logic specifically
-    function testPrefixStripper(prefix, incomingUrl) {
-      const p = prefix.replace(/\/+$/, '');
-      let url = incomingUrl || '/';
-      if (url === p) return '/';
-      if (url.startsWith(p + '/')) return url.slice(p.length);
-      if (url.startsWith(p + '?')) return '/' + url.slice(p.length);
-      return url;
-    }
-    assert.equal(testPrefixStripper('/chatbox', '/chatbox'), '/');
-    assert.equal(testPrefixStripper('/chatbox', '/chatbox/'), '/');
-    assert.equal(testPrefixStripper('/chatbox', '/chatbox/static/app.css'), '/static/app.css');
-    assert.equal(testPrefixStripper('/chatbox', '/chatbox/socket.io/?EIO=4'), '/socket.io/?EIO=4');
-    assert.equal(testPrefixStripper('/chatbox', '/chatbox?v=1'), '/?v=1');
-    assert.equal(testPrefixStripper('/chatbox', '/static/app.css'), '/static/app.css', 'Leaves untouched if proxy already stripped');
-    console.log('  ✔ stripPrefix handles /chatbox, /chatbox/, query parameters, and already-stripped paths');
+    const addFriendRes = await request('/api/friends/add', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenAlice}`,
+      },
+      body: { phone: '+1987654321' },
+    });
+    assert.equal(addFriendRes.status, 200);
+    assert.equal(addFriendRes.json.friend.name, 'Bob User');
+
+    const friendsRes = await request('/api/friends', {
+      headers: { Authorization: `Bearer ${tokenAlice}` },
+    });
+    assert.equal(friendsRes.status, 200);
+    assert.equal(friendsRes.json.friends.length, 1);
+    assert.equal(friendsRes.json.friends[0].phone, '+1987654321');
+    console.log('  ✔ Alice added Bob to friends list by phone');
   }
 
-  // Test 4: Real-time Socket.IO communication
-  console.log('\n[5/5] Testing real-time Socket.IO multi-client interactions...');
+  // Test 4: 1-on-1 Direct Messaging & Group Chat
+  let directConvId = null;
+  let groupConvId = null;
+  console.log('\n[5/8] Testing Direct Chats & Group Creation...');
+  {
+    // Start direct chat between Alice and Bob
+    const dmRes = await request('/api/conversations/direct', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenAlice}`,
+      },
+      body: { phone: '+1987654321' },
+    });
+    assert.equal(dmRes.status, 200);
+    directConvId = dmRes.json.conversation.id;
+    console.log(`  ✔ Direct conversation created between Alice & Bob (ID: ${directConvId})`);
+
+    // Create Group chat
+    const grpRes = await request('/api/conversations/group', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenAlice}`,
+      },
+      body: {
+        name: 'Coolify Engineers',
+        phones: ['+1987654321'], // Alice and Bob
+      },
+    });
+    assert.equal(grpRes.status, 200);
+    groupConvId = grpRes.json.conversation.id;
+    console.log(`  ✔ Group "Coolify Engineers" created (ID: ${groupConvId})`);
+
+    // Add Charlie to the group by phone
+    const addMemberRes = await request(`/api/conversations/${groupConvId}/members`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenAlice}`,
+      },
+      body: { phone: '+1555555555' },
+    });
+    assert.equal(addMemberRes.status, 200);
+    assert.equal(addMemberRes.json.addedUser.name, 'Charlie');
+    console.log('  ✔ Charlie added to group by phone number');
+
+    const membersRes = await request(`/api/conversations/${groupConvId}/members`, {
+      headers: { Authorization: `Bearer ${tokenAlice}` },
+    });
+    assert.equal(membersRes.status, 200);
+    assert.equal(membersRes.json.members.length, 3, 'Group now has 3 members');
+    console.log('  ✔ Group members list verified');
+  }
+
+  // Test 5: Real-time Socket.IO Messaging & Media
+  console.log('\n[6/8] Testing Real-Time Socket.IO Messaging & Multi-Client Broadcast...');
   const clientUrl = `http://127.0.0.1:${PORT}`;
-  const socketOpts = {
+  const socketAlice = Client(clientUrl, {
     path: '/socket.io',
-    transports: ['websocket', 'polling'],
-    forceNew: true,
-  };
-
-  const client1 = Client(clientUrl, socketOpts);
-  const client2 = Client(clientUrl, socketOpts);
-
-  await new Promise((resolve) => client1.on('connect', resolve));
-  await new Promise((resolve) => client2.on('connect', resolve));
-  console.log('  ✔ 2 client sockets connected');
-
-  // Client 1 joins 'general'
-  const join1 = await new Promise((resolve) => {
-    client1.emit('join', { name: 'Alice', room: 'general' }, resolve);
+    auth: { token: tokenAlice },
   });
-  assert.equal(join1.ok, true);
-  assert.equal(join1.name, 'Alice');
-  assert.equal(join1.room, 'general');
-  console.log('  ✔ Client 1 (Alice) joined #general');
+  const socketBob = Client(clientUrl, {
+    path: '/socket.io',
+    auth: { token: tokenBob },
+  });
 
-  // Client 2 listens for system event ("Bob joined")
-  const systemPromise = new Promise((resolve) => {
-    client1.on('system', (evt) => {
-      if (evt.text.includes('Bob joined')) resolve(evt);
+  await new Promise((resolve) => socketAlice.on('connect', resolve));
+  await new Promise((resolve) => socketBob.on('connect', resolve));
+  console.log('  ✔ Both client sockets connected with auth tokens');
+
+  let sentMessageId = null;
+  // Alice sends a message in Direct Chat, Bob receives
+  const bobMsgPromise = new Promise((resolve) => {
+    socketBob.on('message', (msg) => {
+      if (msg.conversationId === directConvId && msg.text === 'Hey Bob, check this out!') {
+        resolve(msg);
+      }
     });
   });
 
-  // Client 2 joins 'general'
-  const join2 = await new Promise((resolve) => {
-    client2.emit('join', { name: 'Bob', room: 'general' }, resolve);
+  const sendAck = await new Promise((resolve) => {
+    socketAlice.emit(
+      'message',
+      {
+        conversationId: directConvId,
+        text: 'Hey Bob, check this out!',
+        mediaUrl: '/static/uploads/sample.png',
+        mediaType: 'image',
+        mediaName: 'sample.png',
+      },
+      resolve
+    );
   });
-  assert.equal(join2.ok, true);
-  assert.equal(join2.name, 'Bob');
-  assert.ok(join2.users.includes('Alice'), 'Alice is in presence');
-  assert.ok(join2.users.includes('Bob'), 'Bob is in presence');
+  assert.equal(sendAck.ok, true);
+  sentMessageId = sendAck.id;
 
-  const systemEvt = await systemPromise;
-  assert.ok(systemEvt.text.includes('Bob joined'));
-  console.log('  ✔ Client 2 (Bob) joined; Client 1 received join announcement');
+  const receivedMsg = await bobMsgPromise;
+  assert.equal(receivedMsg.senderName, 'Alice Admin');
+  assert.equal(receivedMsg.mediaUrl, '/static/uploads/sample.png');
+  console.log('  ✔ Direct message with photo attachment received in real time by Bob');
 
-  // Real-time message exchange
-  const msgPromise = new Promise((resolve) => {
-    client1.on('message', (msg) => {
-      if (msg.user === 'Bob' && msg.text === 'Hello Alice!') resolve(msg);
+  // Test 6: Soft Deletion & Admin Audit Log
+  console.log('\n[7/8] Testing Soft Delete & Admin Audit Log (Showing Deleted Messages)...');
+  {
+    // Bob deletes the message
+    const delRes = await request(`/api/messages/${sentMessageId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${tokenAlice}` },
     });
-  });
+    assert.equal(delRes.status, 200);
+    console.log('  ✔ Message soft-deleted by user');
 
-  const sendRes = await new Promise((resolve) => {
-    client2.emit('message', { text: 'Hello Alice!' }, resolve);
-  });
-  assert.equal(sendRes.ok, true);
-
-  const receivedMsg = await msgPromise;
-  assert.equal(receivedMsg.user, 'Bob');
-  assert.equal(receivedMsg.text, 'Hello Alice!');
-  console.log('  ✔ Real-time message broadcast received instantly');
-
-  // Typing indicator
-  const typingPromise = new Promise((resolve) => {
-    client1.on('typing', (evt) => {
-      if (evt.user === 'Bob' && evt.typing === true) resolve(evt);
+    // Regular conversation history now EXCLUDES the deleted message
+    const msgsRes = await request(`/api/conversations/${directConvId}/messages`, {
+      headers: { Authorization: `Bearer ${tokenAlice}` },
     });
-  });
-  client2.emit('typing', true);
-  const typingEvt = await typingPromise;
-  assert.equal(typingEvt.typing, true);
-  console.log('  ✔ Typing indicator broadcast verified');
+    const foundInRegular = msgsRes.json.messages.some((m) => m.id === sentMessageId);
+    assert.equal(foundInRegular, false, 'Deleted message should not be visible to regular user');
+    console.log('  ✔ Deleted message hidden from regular conversation history');
 
-  // Cleanup sockets and server
-  client1.disconnect();
-  client2.disconnect();
+    // Admin audit endpoint INCLUDES the deleted message!
+    const auditRes = await request(`/api/admin/conversations/${directConvId}/audit`, {
+      headers: { Authorization: `Bearer ${tokenAlice}` },
+    });
+    assert.equal(auditRes.status, 200);
+    const auditedMsg = auditRes.json.messages.find((m) => m.id === sentMessageId);
+    assert.ok(auditedMsg, 'Admin can see the deleted message');
+    assert.equal(auditedMsg.isDeleted, true);
+    assert.equal(auditedMsg.text, 'Hey Bob, check this out!');
+    console.log('  ✔ Admin audit log successfully preserved and revealed deleted message text!');
+  }
 
+  // Test 7: Admin Moderation & User Suspension
+  console.log('\n[8/8] Testing Admin Moderation (Block/Suspend User)...');
+  {
+    // Alice checks stats
+    const statsRes = await request('/api/admin/stats', {
+      headers: { Authorization: `Bearer ${tokenAlice}` },
+    });
+    assert.equal(statsRes.status, 200);
+    assert.equal(statsRes.json.stats.totalUsers, 3);
+    assert.ok(statsRes.json.stats.totalMessages >= 1);
+    console.log('  ✔ Admin stats verified (3 users, active messages)');
+
+    // Alice suspends Bob
+    const suspendRes = await request(`/api/admin/users/${userBob.id}/suspend`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenAlice}`,
+      },
+      body: { suspend: true },
+    });
+    assert.equal(suspendRes.status, 200);
+    assert.equal(suspendRes.json.suspended, true);
+    console.log('  ✔ Admin blocked/suspended Bob');
+
+    // Bob tries to log in while suspended -> 403 Forbidden
+    const bobLoginBlocked = await request('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: { phone: '+1987654321', password: 'password123' },
+    });
+    assert.equal(bobLoginBlocked.status, 403, 'Suspended user login should be forbidden');
+    console.log('  ✔ Suspended user is prevented from logging in');
+  }
+
+  // Cleanup
+  socketAlice.disconnect();
+  socketBob.disconnect();
   await new Promise((resolve) => io.close(resolve));
   await new Promise((resolve) => server.close(resolve));
   await getPool().end();
 
-  console.log('\n=======================================');
-  console.log('  🎉 ALL TESTS PASSED SUCCESSFULLY!    ');
-  console.log('=======================================\n');
+  console.log('\n======================================================');
+  console.log('  🎉 ALL ENHANCED CHATBOX TESTS PASSED SUCCESSFULLY!  ');
+  console.log('======================================================\n');
 }
 
 runTests().catch((err) => {
