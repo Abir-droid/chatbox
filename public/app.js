@@ -766,7 +766,23 @@
 
       const isCurrent = state.activeConversationId === msg.conversationId;
       if (isCurrent) {
-        appendMessage(msg);
+        // If the previous message was from the same sender within 1 minute, swap its avatar to an avatar-spacer
+        const lastRow = el.messages.lastElementChild;
+        if (lastRow && !lastRow.classList.contains('system') && !lastRow.classList.contains('own')) {
+          const lastMsgId = Number(lastRow.id.replace('msg-', ''));
+          const lastMsg = state.messagesCache.get(lastMsgId);
+          if (lastMsg && lastMsg.senderId === msg.senderId && Math.abs(msg.ts - lastMsg.ts) < 60000) {
+            const oldAvatar = lastRow.querySelector('.chat-bubble-avatar');
+            if (oldAvatar) {
+              const spacer = document.createElement('span');
+              spacer.className = 'avatar-spacer';
+              spacer.setAttribute('aria-hidden', 'true');
+              oldAvatar.replaceWith(spacer);
+            }
+          }
+        }
+
+        appendMessage(msg, true);
         scrollToBottom();
         // Active chat: notify server that user has seen this message
         if (msg.senderId !== state.user.id && socket) {
@@ -1106,15 +1122,28 @@
       el.emptyText.textContent = 'Say hello to start the conversation!';
     } else {
       el.emptyState.hidden = true;
-      for (const msg of messages) {
+      for (let i = 0; i < messages.length; i++) {
+        const msg = messages[i];
         state.messagesCache.set(msg.id, msg);
-        appendMessage(msg);
+
+        let isLastInCluster = true;
+        if (i < messages.length - 1) {
+          const nextMsg = messages[i + 1];
+          const sameSender = nextMsg.senderId === msg.senderId;
+          const nextNotSystem = nextMsg.senderName !== 'System';
+          const sameMinute = Math.abs(nextMsg.ts - msg.ts) < 60000;
+          if (sameSender && nextNotSystem && sameMinute) {
+            isLastInCluster = false;
+          }
+        }
+
+        appendMessage(msg, isLastInCluster);
       }
       scrollToBottom();
     }
   }
 
-  function appendMessage(msg) {
+  function appendMessage(msg, isLastInCluster = true) {
     el.emptyState.hidden = true;
     state.messagesCache.set(msg.id, msg);
 
@@ -1156,15 +1185,20 @@
       }
     });
 
-    // Avatar for other user
+    // Avatar for other user (Meta Messenger style: only beside lowest chat bubble in cluster)
     if (!isOwn) {
-      const avatar = document.createElement('span');
-      avatar.style.width = '30px';
-      avatar.style.height = '30px';
-      avatar.style.minWidth = '30px';
-      avatar.style.fontSize = '0.78rem';
-      renderAvatar(avatar, msg.senderName, 0, null);
-      li.appendChild(avatar);
+      if (isLastInCluster) {
+        const avatar = document.createElement('span');
+        avatar.className = 'avatar chat-bubble-avatar';
+        const conv = state.conversations.find((c) => c.id === (msg.conversationId || state.activeConversationId));
+        renderAvatar(avatar, msg.senderName, conv ? conv.avatarColor : 0, conv ? conv.avatarUrl : null);
+        li.appendChild(avatar);
+      } else {
+        const spacer = document.createElement('span');
+        spacer.className = 'avatar-spacer';
+        spacer.setAttribute('aria-hidden', 'true');
+        li.appendChild(spacer);
+      }
     }
 
     const bodyDiv = document.createElement('div');
@@ -1177,24 +1211,18 @@
     swipeIcon.innerHTML = '<svg viewBox="0 0 24 24"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>';
     bodyDiv.appendChild(swipeIcon);
 
-    const meta = document.createElement('div');
-    meta.className = 'msg-meta';
-    
-    const timeSpan = document.createElement('span');
-    timeSpan.textContent = `${isOwn ? 'You' : msg.senderName} • ${formatShortTime(msg.ts)}`;
-    meta.appendChild(timeSpan);
-
-    if (isOwn) {
-      const checkWrap = document.createElement('span');
-      checkWrap.className = 'msg-check-wrap';
-      checkWrap.id = `msg-check-${msg.id}`;
-      checkWrap.innerHTML = renderTickSvg(msg.status);
-      meta.appendChild(checkWrap);
-    }
-
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
     bubble.id = `msg-bubble-${msg.id}`;
+
+    // Sender name inside bubble for incoming messages in group chats
+    const currentConv = state.conversations.find((c) => c.id === (msg.conversationId || state.activeConversationId));
+    if (currentConv && currentConv.type === 'group' && !isOwn) {
+      const authorDiv = document.createElement('div');
+      authorDiv.className = 'bubble-author';
+      authorDiv.textContent = msg.senderName;
+      bubble.appendChild(authorDiv);
+    }
 
     // Quoted reply block (if message is replying to another message)
     const replyTargetId = msg.replyToId || msg.reply_to_id;
@@ -1222,13 +1250,6 @@
         }
       };
       bubble.appendChild(quoteDiv);
-    }
-
-    let textP = null;
-    if (msg.text) {
-      textP = document.createElement('p');
-      textP.textContent = msg.text;
-      bubble.appendChild(textP);
     }
 
     // Media (Photo, Video, or Audio / Voice Note)
@@ -1293,7 +1314,31 @@
       bubble.appendChild(mediaDiv);
     }
 
-    bodyDiv.append(meta, bubble);
+    if (msg.text) {
+      const textP = document.createElement('p');
+      textP.textContent = msg.text;
+      bubble.appendChild(textP);
+    }
+
+    // Integrated WhatsApp-style metadata (time & seen/unseen ticks inside bubble)
+    const bubbleMeta = document.createElement('div');
+    bubbleMeta.className = 'bubble-meta';
+
+    const timeSpan = document.createElement('span');
+    timeSpan.className = 'bubble-time';
+    timeSpan.textContent = formatShortTime(msg.ts);
+    bubbleMeta.appendChild(timeSpan);
+
+    if (isOwn) {
+      const checkWrap = document.createElement('span');
+      checkWrap.className = 'msg-check-wrap';
+      checkWrap.id = `msg-check-${msg.id}`;
+      checkWrap.innerHTML = renderTickSvg(msg.status);
+      bubbleMeta.appendChild(checkWrap);
+    }
+    bubble.appendChild(bubbleMeta);
+
+    bodyDiv.appendChild(bubble);
 
     // Message options menu (down arrow on hover, right click, mobile long-press)
     const menuWrap = document.createElement('div');
@@ -2016,6 +2061,28 @@
       socket.emit('typing', { conversationId: state.activeConversationId, typing: false });
     }, 2000);
   };
+
+  // Mobile virtual keyboard handling: lock window scroll so header remains pinned at top
+  function keepHeaderPinned() {
+    window.scrollTo(0, 0);
+    document.body.scrollTop = 0;
+    if (document.documentElement) document.documentElement.scrollTop = 0;
+    scrollToBottom();
+  }
+
+  el.input.addEventListener('focus', () => {
+    keepHeaderPinned();
+    setTimeout(keepHeaderPinned, 60);
+    setTimeout(keepHeaderPinned, 180);
+    setTimeout(keepHeaderPinned, 350);
+  });
+
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', keepHeaderPinned);
+    window.visualViewport.addEventListener('scroll', () => {
+      window.scrollTo(0, 0);
+    });
+  }
 
   /* ------------------------------------------------------------- voice messages */
   let mediaRecorder = null;
