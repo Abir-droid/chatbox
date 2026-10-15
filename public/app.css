@@ -2251,6 +2251,32 @@ button:active {
   display: block;
 }
 
+/* Edit Preview Bar */
+.edit-preview-bar {
+  border-left-color: #10b981;
+}
+
+.edit-bar-icon {
+  color: #10b981;
+}
+
+.msg-edited-badge {
+  font-size: 0.65rem;
+  color: var(--muted);
+  font-style: italic;
+  margin-left: 3px;
+  user-select: none;
+  opacity: 0.85;
+}
+
+.msg-row.own .msg-edited-badge {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.bubble.has-media-only .bubble-meta .msg-edited-badge {
+  color: rgba(255, 255, 255, 0.85);
+}
+
 /* Media Preview Bar */
 .media-preview-bar {
   display: flex;

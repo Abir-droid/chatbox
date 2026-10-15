@@ -101,6 +101,11 @@
     replyBarSnippet: $('reply-bar-snippet'),
     replyCancel: $('reply-cancel'),
 
+    editPreviewBar: $('edit-preview-bar'),
+    editBarTitle: $('edit-bar-title'),
+    editBarSnippet: $('edit-bar-snippet'),
+    editCancel: $('edit-cancel'),
+
     emojiBtn: $('emoji-btn'),
     emojiPicker: $('emoji-picker'),
 
@@ -233,6 +238,7 @@
     selectedFile: null,
     selectedFiles: [],
     replyTarget: null,
+    editingTarget: null,
     typers: new Map(),
     notificationsEnabled: typeof Notification !== 'undefined' && Notification.permission === 'granted',
     selectionMode: false,
@@ -243,6 +249,21 @@
   };
 
   let socket = null;
+
+  function normalizeMediaUrl(url) {
+    if (!url) return '';
+    if (url.startsWith('blob:') || url.startsWith('data:') || url.startsWith('http://') || url.startsWith('https://')) {
+      return url;
+    }
+    if (url.includes('/static/uploads/')) {
+      const filename = url.split('/static/uploads/')[1];
+      return `${BASE || ''}/static/uploads/${filename}`;
+    }
+    if (url.startsWith('/static/')) {
+      return `${BASE || ''}${url}`;
+    }
+    return url;
+  }
 
   // Force update browser tab favicon with dynamic cache buster to override stale green icon
   try {
@@ -455,7 +476,7 @@
       elem.className = `avatar u ${isOnline ? 'online' : ''}`;
       const img = document.createElement('img');
       img.className = 'avatar-img';
-      img.src = avatarUrl;
+      img.src = normalizeMediaUrl(avatarUrl);
       img.alt = name || 'Avatar';
       img.onerror = () => {
         elem.replaceChildren();
@@ -1020,6 +1041,33 @@
       removeMessageRow(id);
     });
 
+    socket.on('message_edited', ({ id, conversationId, text, isEdited }) => {
+      const cached = state.messagesCache.get(id);
+      if (cached) {
+        cached.text = text;
+        cached.isEdited = isEdited;
+      }
+      const row = $(`msg-${id}`);
+      if (row) {
+        const textEl = row.querySelector('.bubble-text');
+        if (textEl) {
+          textEl.innerHTML = formatMessageText(text);
+        }
+        const metaEl = row.querySelector('.bubble-meta');
+        if (metaEl && !metaEl.querySelector('.msg-edited-badge')) {
+          const badge = document.createElement('span');
+          badge.className = 'msg-edited-badge';
+          badge.textContent = 'edited';
+          metaEl.prepend(badge);
+        }
+      }
+      const conv = state.conversations.find((c) => c.id === conversationId);
+      if (conv && conv.lastMessage && conv.lastMessage.ts && cached && conv.lastMessage.ts === cached.ts) {
+        conv.lastMessage.text = text;
+        renderConversations();
+      }
+    });
+
     socket.on('typing', ({ conversationId, userId, userName, typing }) => {
       if (state.activeConversationId === conversationId && userId !== state.user.id) {
         if (typing) {
@@ -1246,6 +1294,7 @@
     state.typers.clear();
     renderTyping();
     cancelReply();
+    cancelEdit();
     clearMediaSelection();
 
     const conv = state.conversations.find((c) => c.id === convId);
@@ -1356,9 +1405,10 @@
 
   async function downloadMediaFile(url, defaultName) {
     if (!url) return;
+    const finalUrl = normalizeMediaUrl(url);
     try {
       toast('Downloading media…');
-      const response = await fetch(url);
+      const response = await fetch(finalUrl);
       if (!response.ok) throw new Error('Download failed');
       const blob = await response.blob();
       const blobUrl = URL.createObjectURL(blob);
@@ -1367,7 +1417,7 @@
       a.href = blobUrl;
       let filename = defaultName || '';
       if (!filename || filename === 'Photo' || filename === 'Video' || filename === 'Voice note' || filename === 'Media') {
-        const ext = url.split('.').pop().split('?')[0] || 'bin';
+        const ext = finalUrl.split('.').pop().split('?')[0] || 'bin';
         filename = `chatbox-${Date.now()}.${ext}`;
       }
       a.download = filename;
@@ -1379,7 +1429,7 @@
       }, 1000);
     } catch {
       const a = document.createElement('a');
-      a.href = url;
+      a.href = finalUrl;
       a.download = defaultName || 'download';
       a.target = '_blank';
       document.body.appendChild(a);
@@ -1399,7 +1449,9 @@
       if (existingOptRow) {
         const cached = state.messagesCache.get(msg.tempId);
         if (cached && Array.isArray(cached.blobUrls)) {
-          cached.blobUrls.forEach((u) => { try { URL.revokeObjectURL(u); } catch (e) {} });
+          setTimeout(() => {
+            cached.blobUrls.forEach((u) => { try { URL.revokeObjectURL(u); } catch (e) {} });
+          }, 60000);
         }
         state.messagesCache.delete(msg.tempId);
       }
@@ -1559,7 +1611,7 @@
 
         if (isVid) {
           const video = document.createElement('video');
-          video.src = item.url;
+          video.src = normalizeMediaUrl(item.url);
           video.preload = 'metadata';
           video.muted = true;
           itemEl.appendChild(video);
@@ -1570,7 +1622,7 @@
           itemEl.appendChild(badge);
         } else {
           const img = document.createElement('img');
-          img.src = item.url;
+          img.src = normalizeMediaUrl(item.url);
           img.alt = item.mediaName || 'Photo';
           img.loading = 'lazy';
           itemEl.appendChild(img);
@@ -1632,7 +1684,7 @@
         header.innerHTML = '<svg viewBox="0 0 24 24" class="voice-bubble-icon" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg><span>Voice Note</span>';
 
         const audio = document.createElement('audio');
-        audio.src = mediaUrl;
+        audio.src = normalizeMediaUrl(mediaUrl);
         audio.controls = true;
         audio.preload = 'metadata';
         mediaDiv.append(header, audio);
@@ -1644,7 +1696,7 @@
         }
         mediaDiv.className = 'msg-media';
         const video = document.createElement('video');
-        video.src = mediaUrl;
+        video.src = normalizeMediaUrl(mediaUrl);
         video.controls = true;
         video.preload = 'metadata';
         mediaDiv.appendChild(video);
@@ -1656,7 +1708,7 @@
         }
         mediaDiv.className = 'msg-media';
         const img = document.createElement('img');
-        img.src = mediaUrl;
+        img.src = normalizeMediaUrl(mediaUrl);
         img.alt = singleItem.mediaName || 'Photo';
         img.loading = 'lazy';
         img.onclick = () => {
@@ -1677,6 +1729,7 @@
 
     if (msg.text) {
       const textP = document.createElement('p');
+      textP.className = 'bubble-text';
       textP.textContent = msg.text;
       bubble.appendChild(textP);
     }
@@ -1684,6 +1737,13 @@
     // Integrated WhatsApp-style metadata (time & seen/unseen ticks inside bubble)
     const bubbleMeta = document.createElement('div');
     bubbleMeta.className = 'bubble-meta';
+
+    if (msg.isEdited || msg.is_edited) {
+      const editedSpan = document.createElement('span');
+      editedSpan.className = 'msg-edited-badge';
+      editedSpan.textContent = 'edited';
+      bubbleMeta.appendChild(editedSpan);
+    }
 
     const timeSpan = document.createElement('span');
     timeSpan.className = 'bubble-time';
@@ -1866,6 +1926,20 @@
       openForwardDialog();
     };
     dropdown.appendChild(forwardItem);
+
+    // Option: Edit Message (for own text messages)
+    if (isOwn && msg.text && !isUploading) {
+      const editItem = document.createElement('button');
+      editItem.type = 'button';
+      editItem.className = 'msg-dropdown-item';
+      editItem.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg><span>Edit message</span>';
+      editItem.onclick = (e) => {
+        e.stopPropagation();
+        closeAllDropdowns();
+        startEditMessage(msg);
+      };
+      dropdown.appendChild(editItem);
+    }
 
     // Option 3: Copy Text
     if (msg.text) {
@@ -2330,6 +2404,7 @@
 
   /* ------------------------------------------------------------- reply feature */
   function startReply(msg) {
+    cancelEdit();
     let snippet = msg.text || '';
     if (!snippet) {
       const type = (msg.mediaType || msg.media_type || '').toLowerCase();
@@ -2362,6 +2437,30 @@
 
   if (el.replyCancel) {
     el.replyCancel.onclick = cancelReply;
+  }
+
+  /* ------------------------------------------------------------- edit message feature */
+  function startEditMessage(msg) {
+    cancelReply();
+    state.editingTarget = { id: msg.id, originalText: msg.text || '' };
+    if (el.editBarSnippet) el.editBarSnippet.textContent = msg.text || '';
+    if (el.editPreviewBar) el.editPreviewBar.hidden = false;
+    el.input.value = msg.text || '';
+    adjustInputHeight();
+    el.input.focus();
+  }
+
+  function cancelEdit() {
+    state.editingTarget = null;
+    if (el.editPreviewBar) {
+      el.editPreviewBar.hidden = true;
+    }
+    el.input.value = '';
+    adjustInputHeight();
+  }
+
+  if (el.editCancel) {
+    el.editCancel.onclick = cancelEdit;
   }
 
   let currentLightboxMedia = null;
@@ -2423,7 +2522,7 @@
       }
       if (el.lightboxVideo) {
         el.lightboxVideo.hidden = false;
-        el.lightboxVideo.src = item.url;
+        el.lightboxVideo.src = normalizeMediaUrl(item.url);
         el.lightboxVideo.play().catch(() => {});
       }
     } else {
@@ -2434,7 +2533,7 @@
       }
       if (el.lightboxImg) {
         el.lightboxImg.hidden = false;
-        el.lightboxImg.src = item.url;
+        el.lightboxImg.src = normalizeMediaUrl(item.url);
       }
     }
 
@@ -2489,7 +2588,7 @@
 
       if (isVideo) {
         const vid = document.createElement('video');
-        vid.src = item.url;
+        vid.src = normalizeMediaUrl(item.url);
         vid.preload = 'metadata';
         vid.muted = true;
         const iconWrap = document.createElement('div');
@@ -2498,7 +2597,7 @@
         thumb.append(vid, iconWrap);
       } else {
         const img = document.createElement('img');
-        img.src = item.url;
+        img.src = normalizeMediaUrl(item.url);
         img.alt = item.mediaName || 'Thumbnail';
         img.loading = 'lazy';
         thumb.appendChild(img);
@@ -2662,6 +2761,29 @@
   el.composer.onsubmit = async (e) => {
     e.preventDefault();
     if (!state.activeConversationId) return;
+
+    // Handle Editing mode
+    if (state.editingTarget) {
+      const newText = el.input.value.trim();
+      if (!newText) {
+        toast('Message text cannot be empty');
+        return;
+      }
+      const editMsgId = state.editingTarget.id;
+      cancelEdit();
+
+      try {
+        await api(`/api/messages/${editMsgId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: newText }),
+        });
+        toast('Message edited');
+      } catch (err) {
+        toast(err.message || 'Failed to edit message');
+      }
+      return;
+    }
 
     const text = el.input.value.trim();
     const filesToSend = (state.selectedFiles && state.selectedFiles.length > 0)
@@ -3730,7 +3852,7 @@
         thumb.className = 'media-browser-thumb';
         if (category === 'videos') {
           const vid = document.createElement('video');
-          vid.src = item.url;
+          vid.src = normalizeMediaUrl(item.url);
           vid.preload = 'metadata';
           vid.muted = true;
           const badge = document.createElement('div');
@@ -3739,7 +3861,7 @@
           thumb.append(vid, badge);
         } else {
           const img = document.createElement('img');
-          img.src = item.url;
+          img.src = normalizeMediaUrl(item.url);
           img.alt = item.mediaName || 'Photo';
           img.loading = 'lazy';
           thumb.appendChild(img);
@@ -3783,7 +3905,7 @@
               <div class="media-file-meta">${formatShortTime(item.ts)}</div>
             </div>
           </div>
-          <audio src="${item.url}" controls preload="none" style="width:100%;height:36px;"></audio>
+          <audio src="${normalizeMediaUrl(item.url)}" controls preload="none" style="width:100%;height:36px;"></audio>
         `;
         el.infoMediaContent.appendChild(audioCard);
       });
@@ -4387,6 +4509,7 @@
     if (e.key === 'Escape') {
       closeAllDropdowns();
       if (state.replyTarget) cancelReply();
+      if (state.editingTarget) cancelEdit();
     }
   });
 

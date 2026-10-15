@@ -149,6 +149,17 @@ async function initDatabase() {
         ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS reply_to_text TEXT;
         ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'sent';
         ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE;
+        ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS is_edited BOOLEAN NOT NULL DEFAULT FALSE;
+        ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
+
+        -- Persistent media storage table so container redeploys never wipe out files
+        CREATE TABLE IF NOT EXISTS chat_media_files (
+          filename   TEXT PRIMARY KEY,
+          mime_type  TEXT NOT NULL,
+          data       BYTEA NOT NULL,
+          size       INTEGER NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
 
         -- Migrations for profile pic, conversation clear, and friend requests
         ALTER TABLE chat_users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
@@ -456,6 +467,21 @@ const upload = multer({
   },
 });
 
+async function persistMediaFile(file) {
+  if (!file || !file.filename || !file.path) return;
+  try {
+    const data = await fs.promises.readFile(file.path);
+    await pool.query(
+      `INSERT INTO chat_media_files (filename, mime_type, data, size)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (filename) DO UPDATE SET data = $3, mime_type = $2, size = $4`,
+      [file.filename, file.mimetype || 'application/octet-stream', data, file.size || data.length]
+    );
+  } catch (err) {
+    console.error('Failed to persist media file to DB:', err);
+  }
+}
+
 /* -------------------------------------------------------------------- http */
 
 const ASSET_VERSION = String(Date.now());
@@ -502,7 +528,39 @@ app.get(['/favicon.ico', '/static/favicon.svg'], (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'favicon.svg'));
 });
 
-// Serve static assets and uploaded media
+// Serve static assets and uploaded media with dynamic PostgreSQL restore
+app.get('/static/uploads/:filename', async (req, res, next) => {
+  const filename = path.basename(req.params.filename);
+  const filePath = path.join(UPLOADS_DIR, filename);
+
+  if (fs.existsSync(filePath)) {
+    return next();
+  }
+
+  // Not on disk (e.g. after container redeploy) -> fetch from database
+  try {
+    const { rows } = await pool.query(
+      'SELECT mime_type, data FROM chat_media_files WHERE filename = $1',
+      [filename]
+    );
+    if (rows.length && rows[0].data) {
+      // Re-cache to disk for fast subsequent reads
+      try {
+        await fs.promises.writeFile(filePath, rows[0].data);
+      } catch (writeErr) {
+        console.error('Failed to write media cache to disk:', writeErr);
+      }
+      res.setHeader('Content-Type', rows[0].mime_type || 'application/octet-stream');
+      res.setHeader('Cache-Control', 'public, max-age=2592000');
+      return res.end(rows[0].data);
+    }
+  } catch (err) {
+    console.error('Error fetching media from DB:', err);
+  }
+
+  next();
+});
+
 app.use('/static/uploads', express.static(UPLOADS_DIR, { index: false, maxAge: '30d' }));
 app.use('/static', express.static(path.join(__dirname, 'public'), { index: false, maxAge: '7d' }));
 
@@ -1348,7 +1406,7 @@ app.get('/api/conversations/:id/messages', authMiddleware, async (req, res) => {
     if (clearedAt) {
       const q = await pool.query(
         `SELECT id, conversation_id, sender_id, sender_name, body, media_url, media_type, media_name, media_list,
-                reply_to_id, reply_to_sender, reply_to_text, status, created_at
+                reply_to_id, reply_to_sender, reply_to_text, status, is_edited, edited_at, created_at
          FROM chat_messages
          WHERE conversation_id = $1 AND is_deleted = FALSE AND created_at > $2
          ORDER BY id DESC LIMIT 100`,
@@ -1358,7 +1416,7 @@ app.get('/api/conversations/:id/messages', authMiddleware, async (req, res) => {
     } else {
       const q = await pool.query(
         `SELECT id, conversation_id, sender_id, sender_name, body, media_url, media_type, media_name, media_list,
-                reply_to_id, reply_to_sender, reply_to_text, status, created_at
+                reply_to_id, reply_to_sender, reply_to_text, status, is_edited, edited_at, created_at
          FROM chat_messages
          WHERE conversation_id = $1 AND is_deleted = FALSE
          ORDER BY id DESC LIMIT 100`,
@@ -1404,6 +1462,8 @@ app.get('/api/conversations/:id/messages', authMiddleware, async (req, res) => {
           replyToSender: r.reply_to_sender || null,
           replyToText: r.reply_to_text || null,
           status: r.status || 'sent',
+          isEdited: !!r.is_edited,
+          editedAt: r.edited_at ? new Date(r.edited_at).getTime() : null,
           ts: new Date(r.created_at).getTime(),
         };
       })
@@ -1546,10 +1606,13 @@ function inspectFileMediaType(file) {
 }
 
 // Media: Upload Photo / Video / Audio (Voice Message)
-app.post('/api/upload', authMiddleware, upload.single('media'), (req, res) => {
+app.post('/api/upload', authMiddleware, upload.single('media'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ ok: false, error: 'No media file provided.' });
   }
+
+  // Persist file into PostgreSQL so redeployments never lose it
+  await persistMediaFile(req.file);
 
   const mediaType = inspectFileMediaType(req.file);
   const url = `${PREFIX}/static/uploads/${req.file.filename}`;
@@ -1564,11 +1627,15 @@ app.post('/api/upload', authMiddleware, upload.single('media'), (req, res) => {
 });
 
 // Media: Upload Multiple Photos / Videos / Audio in one go
-app.post('/api/upload-multiple', authMiddleware, upload.array('media', 20), (req, res) => {
+app.post('/api/upload-multiple', authMiddleware, upload.array('media', 20), async (req, res) => {
   const files = req.files || [];
   if (!files.length && req.file) files.push(req.file);
   if (!files.length) {
     return res.status(400).json({ ok: false, error: 'No media files provided.' });
+  }
+
+  for (const f of files) {
+    await persistMediaFile(f);
   }
 
   const results = files.map((f) => ({
@@ -1579,6 +1646,62 @@ app.post('/api/upload-multiple', authMiddleware, upload.array('media', 20), (req
   }));
 
   res.json({ ok: true, files: results });
+});
+
+// Messages: Edit (Telegram-style inline message editing)
+app.patch('/api/messages/:id', authMiddleware, async (req, res) => {
+  try {
+    const msgId = Number(req.params.id);
+    const newText = typeof req.body.text === 'string' ? req.body.text.trim() : '';
+
+    if (!newText) {
+      return res.status(400).json({ ok: false, error: 'Message text cannot be empty.' });
+    }
+
+    const { rows } = await pool.query(
+      'SELECT id, conversation_id, sender_id, is_deleted FROM chat_messages WHERE id = $1',
+      [msgId]
+    );
+
+    if (!rows.length || rows[0].is_deleted) {
+      return res.status(404).json({ ok: false, error: 'Message not found.' });
+    }
+
+    const msg = rows[0];
+    const isOwner = Number(msg.sender_id) === req.user.id;
+    if (!isOwner && !req.user.is_admin) {
+      return res.status(403).json({ ok: false, error: 'You can only edit your own messages.' });
+    }
+
+    await pool.query(
+      'UPDATE chat_messages SET body = $1, is_edited = TRUE, edited_at = now() WHERE id = $2',
+      [newText, msgId]
+    );
+
+    const editedAt = Date.now();
+    // Broadcast edit in real time to conversation
+    io.to(`c:${msg.conversation_id}`).emit('message_edited', {
+      id: msgId,
+      conversationId: Number(msg.conversation_id),
+      text: newText,
+      isEdited: true,
+      editedAt,
+    });
+
+    res.json({
+      ok: true,
+      message: {
+        id: msgId,
+        conversationId: Number(msg.conversation_id),
+        text: newText,
+        isEdited: true,
+        editedAt,
+      },
+    });
+  } catch (err) {
+    console.error('Edit message failed:', err);
+    res.status(500).json({ ok: false, error: 'Could not edit message.' });
+  }
 });
 
 // Messages: Delete (Telegram-style: gone without a trace)
@@ -1616,8 +1739,10 @@ app.delete('/api/messages/:id', authMiddleware, async (req, res) => {
       try {
         const parts = mUrl.split('/static/uploads/');
         if (parts.length > 1) {
-          const filePath = path.join(UPLOADS_DIR, path.basename(parts[1]));
+          const fname = path.basename(parts[1]);
+          const filePath = path.join(UPLOADS_DIR, fname);
           if (fs.existsSync(filePath)) await fs.promises.unlink(filePath);
+          await pool.query('DELETE FROM chat_media_files WHERE filename = $1', [fname]).catch(() => {});
         }
       } catch (e) {}
     }
@@ -1792,8 +1917,10 @@ app.delete('/api/admin/users/:id', authMiddleware, adminMiddleware, async (req, 
       try {
         const parts = mUrl.split('/static/uploads/');
         if (parts.length > 1) {
-          const filePath = path.join(UPLOADS_DIR, path.basename(parts[1]));
+          const fname = path.basename(parts[1]);
+          const filePath = path.join(UPLOADS_DIR, fname);
           if (fs.existsSync(filePath)) await fs.promises.unlink(filePath);
+          await pool.query('DELETE FROM chat_media_files WHERE filename = $1', [fname]).catch(() => {});
         }
       } catch (e) {}
     }
@@ -2142,6 +2269,51 @@ io.on('connection', async (socket) => {
     } catch (err) {
       console.error('Socket message failed:', err);
       reply({ ok: false, error: 'Failed to send message.' });
+    }
+  });
+
+  // Edit message
+  socket.on('edit_message', async (payload, ack) => {
+    const reply = typeof ack === 'function' ? ack : () => {};
+    const msgId = Number(payload && payload.id);
+    const newText = String((payload && payload.text) || '').trim();
+
+    if (!msgId || !newText) {
+      return reply({ ok: false, error: 'Invalid message or empty text.' });
+    }
+
+    try {
+      const { rows } = await pool.query(
+        'SELECT id, conversation_id, sender_id, is_deleted FROM chat_messages WHERE id = $1',
+        [msgId]
+      );
+      if (!rows.length || rows[0].is_deleted) {
+        return reply({ ok: false, error: 'Message not found.' });
+      }
+
+      const msg = rows[0];
+      if (Number(msg.sender_id) !== user.id && !user.is_admin) {
+        return reply({ ok: false, error: 'You can only edit your own messages.' });
+      }
+
+      await pool.query(
+        'UPDATE chat_messages SET body = $1, is_edited = TRUE, edited_at = now() WHERE id = $2',
+        [newText, msgId]
+      );
+
+      const editedAt = Date.now();
+      io.to(`c:${msg.conversation_id}`).emit('message_edited', {
+        id: msgId,
+        conversationId: Number(msg.conversation_id),
+        text: newText,
+        isEdited: true,
+        editedAt,
+      });
+
+      reply({ ok: true, id: msgId, text: newText, isEdited: true, editedAt });
+    } catch (err) {
+      console.error('Socket edit_message error:', err);
+      reply({ ok: false, error: 'Failed to edit message.' });
     }
   });
 

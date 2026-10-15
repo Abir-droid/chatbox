@@ -298,6 +298,23 @@
         </button>
       </div>
 
+      <!-- Edit Preview Bar (when editing a message) -->
+      <div class="reply-preview-bar edit-preview-bar" id="edit-preview-bar" hidden>
+        <div class="reply-bar-icon edit-bar-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 20h9"/>
+            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+          </svg>
+        </div>
+        <div class="reply-bar-content">
+          <span class="reply-bar-title" id="edit-bar-title">Editing message</span>
+          <span class="reply-bar-snippet" id="edit-bar-snippet">Original message text</span>
+        </div>
+        <button type="button" class="icon-btn reply-close" id="edit-cancel" title="Cancel editing" aria-label="Cancel editing">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+
       <!-- File Preview Bar (when media selected) -->
       <div class="media-preview-bar" id="media-preview-bar" hidden>
         <div class="media-previews-wrap" id="media-previews-wrap"></div>
