@@ -154,6 +154,7 @@ async function initDatabase() {
         ALTER TABLE chat_users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
         ALTER TABLE chat_conversation_members ADD COLUMN IF NOT EXISTS cleared_at TIMESTAMPTZ;
         ALTER TABLE chat_conversation_members ADD COLUMN IF NOT EXISTS is_hidden BOOLEAN NOT NULL DEFAULT FALSE;
+        ALTER TABLE chat_conversations ADD COLUMN IF NOT EXISTS avatar_url TEXT;
 
         CREATE TABLE IF NOT EXISTS chat_friend_requests (
           id             BIGSERIAL PRIMARY KEY,
@@ -922,7 +923,7 @@ app.post('/api/friends/requests/:id/decline', authMiddleware, async (req, res) =
 app.get('/api/conversations', authMiddleware, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT c.id, c.type, c.name, c.created_at, c.updated_at, m.cleared_at, m.is_hidden
+      `SELECT c.id, c.type, c.name, c.avatar_url, c.created_at, c.updated_at, m.cleared_at, m.is_hidden
        FROM chat_conversations c
        JOIN chat_conversation_members m ON c.id = m.conversation_id
        WHERE m.user_id = $1
@@ -965,7 +966,7 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
       let displayPhone = null;
       let otherUserId = null;
       let avatarColor = 0;
-      let avatarUrl = null;
+      let avatarUrl = conv.avatar_url || null;
       let isOnline = false;
 
       if (conv.type === 'direct') {
@@ -1251,6 +1252,51 @@ app.post('/api/conversations/:id/members', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('Add member failed:', err);
     res.status(500).json({ ok: false, error: 'Could not add member.' });
+  }
+});
+
+// Conversations: Update group profile photo
+app.post('/api/conversations/:id/avatar', authMiddleware, async (req, res) => {
+  try {
+    const convId = Number(req.params.id);
+    if (!convId) return res.status(400).json({ ok: false, error: 'Invalid conversation.' });
+
+    // Verify user is a member of this conversation
+    const memberCheck = await pool.query(
+      'SELECT role FROM chat_conversation_members WHERE conversation_id = $1 AND user_id = $2',
+      [convId, req.user.id]
+    );
+    if (!memberCheck.rows.length) {
+      return res.status(403).json({ ok: false, error: 'You are not a member of this group.' });
+    }
+
+    const convRes = await pool.query('SELECT type, name FROM chat_conversations WHERE id = $1', [convId]);
+    if (!convRes.rows.length || convRes.rows[0].type !== 'group') {
+      return res.status(400).json({ ok: false, error: 'Only group conversations have a group photo.' });
+    }
+
+    const avatarUrl = typeof req.body.avatarUrl === 'string' ? req.body.avatarUrl.trim() : (req.body.avatarUrl === null ? null : undefined);
+
+    if (avatarUrl !== undefined) {
+      await pool.query('UPDATE chat_conversations SET avatar_url = $1, updated_at = now() WHERE id = $2', [avatarUrl, convId]);
+    }
+
+    // Broadcast update to all group members
+    const members = await pool.query('SELECT user_id FROM chat_conversation_members WHERE conversation_id = $1', [convId]);
+    const targetRooms = [`c:${convId}`];
+    for (const m of members.rows) {
+      targetRooms.push(`u:${m.user_id}`);
+    }
+
+    io.to(targetRooms).emit('group_avatar_updated', {
+      conversationId: convId,
+      avatarUrl: avatarUrl || null,
+    });
+
+    res.json({ ok: true, avatarUrl: avatarUrl || null });
+  } catch (err) {
+    console.error('Update group avatar failed:', err);
+    res.status(500).json({ ok: false, error: 'Could not update group photo.' });
   }
 });
 

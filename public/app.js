@@ -62,6 +62,7 @@
     convTitle: $('conv-title'),
     convSub: $('conv-sub'),
     manageGroupBtn: $('manage-group-btn'),
+    convInfoBtn: $('conv-info-btn'),
     convDropdown: $('conv-dropdown'),
     deleteConvBtn: $('delete-conv-btn'),
 
@@ -122,6 +123,10 @@
     friendError: $('friend-error'),
 
     groupMembersDialog: $('group-members-dialog'),
+    groupAvatarPreview: $('group-avatar-preview'),
+    groupPicInput: $('group-pic-input'),
+    groupUploadTrigger: $('group-upload-trigger'),
+    groupRemovePicBtn: $('group-remove-pic-btn'),
     addMemberForm: $('add-member-form'),
     newMemberCountry: $('new-member-country'),
     newMemberPhone: $('new-member-phone'),
@@ -170,11 +175,6 @@
     infoPhoneLabel: $('info-phone-label'),
     infoGroupDescWrap: $('info-group-desc-wrap'),
     infoGroupDescText: $('info-group-desc-text'),
-    infoActMessage: $('info-act-message'),
-    infoActMute: $('info-act-mute'),
-    infoMuteText: $('info-mute-text'),
-    infoActSearch: $('info-act-search'),
-    infoActMore: $('info-act-more'),
     infoRowPhotos: $('info-row-photos'),
     infoRowVideos: $('info-row-videos'),
     infoRowFiles: $('info-row-files'),
@@ -877,6 +877,25 @@
       }
     });
 
+    socket.on('group_avatar_updated', ({ conversationId, avatarUrl }) => {
+      const conv = state.conversations.find((c) => c.id === conversationId);
+      if (conv) {
+        conv.avatarUrl = avatarUrl;
+        renderConversations();
+        if (state.activeConversationId === conversationId) {
+          if (avatarUrl) {
+            renderAvatar(el.convAvatar, conv.name, conv.avatarColor || 0, avatarUrl, false);
+          } else {
+            el.convAvatar.className = `avatar c-${conv.avatarColor || 0}`;
+            el.convAvatar.textContent = '👥';
+          }
+          if (el.groupMembersDialog && el.groupMembersDialog.open) {
+            renderGroupAvatarPreview();
+          }
+        }
+      }
+    });
+
     socket.on('friend_request_received', ({ sender }) => {
       playReceiveSound();
       toast(`Friend request received from ${sender.name}!`);
@@ -1105,8 +1124,12 @@
 
       const avatar = document.createElement('span');
       if (conv.type === 'group') {
-        avatar.className = `avatar c-${conv.avatarColor || 0}`;
-        avatar.textContent = '👥';
+        if (conv.avatarUrl) {
+          renderAvatar(avatar, conv.name, conv.avatarColor || 0, conv.avatarUrl, false);
+        } else {
+          avatar.className = `avatar c-${conv.avatarColor || 0}`;
+          avatar.textContent = '👥';
+        }
       } else {
         renderAvatar(avatar, conv.name, conv.avatarColor, conv.avatarUrl, conv.isOnline);
       }
@@ -1233,14 +1256,20 @@
     // Setup Header
     el.convTitle.textContent = conv.name;
     if (conv.type === 'group') {
-      el.convAvatar.className = `avatar c-${conv.avatarColor || 0}`;
-      el.convAvatar.textContent = '👥';
+      if (conv.avatarUrl) {
+        renderAvatar(el.convAvatar, conv.name, conv.avatarColor || 0, conv.avatarUrl, false);
+      } else {
+        el.convAvatar.className = `avatar c-${conv.avatarColor || 0}`;
+        el.convAvatar.textContent = '👥';
+      }
       el.convSub.textContent = `${conv.memberCount} members`;
       el.manageGroupBtn.hidden = false;
+      if (el.convInfoBtn) el.convInfoBtn.hidden = true;
     } else {
       renderAvatar(el.convAvatar, conv.name, conv.avatarColor, conv.avatarUrl, conv.isOnline);
       el.convSub.textContent = `${conv.phone} • ${conv.isOnline ? 'Online' : 'Offline'}`;
       el.manageGroupBtn.hidden = true;
+      if (el.convInfoBtn) el.convInfoBtn.hidden = false;
     }
     closeChatInfoPanel();
     if (el.convDropdown) el.convDropdown.hidden = true;
@@ -3591,8 +3620,13 @@
 
     if (conv.type === 'group') {
       if (el.infoAvatar) {
-        el.infoAvatar.className = `avatar c-${conv.avatarColor || 0} large`;
-        el.infoAvatar.textContent = '👥';
+        if (conv.avatarUrl) {
+          renderAvatar(el.infoAvatar, conv.name, conv.avatarColor || 0, conv.avatarUrl, false);
+          el.infoAvatar.classList.add('large');
+        } else {
+          el.infoAvatar.className = `avatar c-${conv.avatarColor || 0} large`;
+          el.infoAvatar.textContent = '👥';
+        }
       }
       if (el.infoStatus) el.infoStatus.textContent = `${conv.memberCount || 1} members`;
       if (el.infoPhoneText) el.infoPhoneText.textContent = `${conv.memberCount || 1} members in group`;
@@ -3758,6 +3792,8 @@
 
   function toggleChatInfoPanel() {
     if (!state.activeConversationId) return;
+    const conv = state.conversations.find((c) => c.id === state.activeConversationId);
+    if (!conv || conv.type === 'group') return;
     if (el.chatInfoPanel && el.chatInfoPanel.classList.contains('open')) {
       closeChatInfoPanel();
     } else {
@@ -3765,11 +3801,24 @@
     }
   }
 
-  // Toggle sidepanel when clicking conversation details (avatar/name) in header
+  // Round blue 'i' info button in header
+  if (el.convInfoBtn) {
+    el.convInfoBtn.onclick = () => {
+      toggleChatInfoPanel();
+    };
+  }
+
+  // Toggle sidepanel / group members when clicking conversation details (avatar/name) in header
   const headerDetails = document.querySelector('.conv-details');
   if (headerDetails) {
     headerDetails.onclick = () => {
-      toggleChatInfoPanel();
+      if (!state.activeConversationId) return;
+      const conv = state.conversations.find((c) => c.id === state.activeConversationId);
+      if (conv && conv.type === 'group') {
+        openGroupModal();
+      } else {
+        toggleChatInfoPanel();
+      }
     };
   }
 
@@ -3794,36 +3843,6 @@
   if (el.infoRowVideos) el.infoRowVideos.onclick = () => openSharedMediaBrowser('videos');
   if (el.infoRowFiles) el.infoRowFiles.onclick = () => openSharedMediaBrowser('files');
   if (el.infoRowVoice) el.infoRowVoice.onclick = () => openSharedMediaBrowser('audio');
-
-  // Quick action tile handlers
-  if (el.infoActMessage) {
-    el.infoActMessage.onclick = () => {
-      closeChatInfoPanel();
-      if (el.input) el.input.focus();
-    };
-  }
-
-  let isMuted = false;
-  if (el.infoActMute) {
-    el.infoActMute.onclick = () => {
-      isMuted = !isMuted;
-      if (el.infoMuteText) el.infoMuteText.textContent = isMuted ? 'Unmute' : 'Mute';
-      toast(isMuted ? 'Conversation muted' : 'Conversation unmuted');
-    };
-  }
-
-  if (el.infoActSearch) {
-    el.infoActSearch.onclick = () => {
-      closeChatInfoPanel();
-      if (el.railSearchInput) el.railSearchInput.focus();
-    };
-  }
-
-  if (el.infoActMore) {
-    el.infoActMore.onclick = () => {
-      if (el.infoActDeleteChat) el.infoActDeleteChat.scrollIntoView({ behavior: 'smooth' });
-    };
-  }
 
   // Bottom action buttons in sidepanel
   if (el.infoActShare) {
@@ -3888,6 +3907,7 @@
         state.activeConversationId = null;
         if (el.convDropdown) el.convDropdown.hidden = true;
         el.manageGroupBtn.hidden = true;
+        if (el.convInfoBtn) el.convInfoBtn.hidden = true;
         el.convTitle.textContent = 'Select a conversation';
         el.convSub.textContent = 'or start a new chat';
         renderAvatar(el.convAvatar, '#', 0, null);
@@ -4031,13 +4051,99 @@
     };
   }
 
-  // Group Members modal
-  el.manageGroupBtn.onclick = async () => {
+  function renderGroupAvatarPreview() {
+    if (!el.groupAvatarPreview) return;
+    const conv = state.conversations.find((c) => c.id === state.activeConversationId);
+    if (!conv) return;
+    if (conv.avatarUrl) {
+      renderAvatar(el.groupAvatarPreview, conv.name, conv.avatarColor || 0, conv.avatarUrl, false);
+      el.groupAvatarPreview.classList.add('large');
+      if (el.groupRemovePicBtn) el.groupRemovePicBtn.hidden = false;
+    } else {
+      el.groupAvatarPreview.className = `avatar c-${conv.avatarColor || 0} large`;
+      el.groupAvatarPreview.textContent = '👥';
+      if (el.groupRemovePicBtn) el.groupRemovePicBtn.hidden = true;
+    }
+  }
+
+  function openGroupModal() {
     if (!state.activeConversationId) return;
     el.addMemberError.textContent = '';
+    renderGroupAvatarPreview();
     el.groupMembersDialog.showModal();
     loadGroupMembers();
-  };
+  }
+
+  // Group Members modal
+  if (el.manageGroupBtn) {
+    el.manageGroupBtn.onclick = () => openGroupModal();
+  }
+
+  if (el.groupUploadTrigger) {
+    el.groupUploadTrigger.onclick = () => el.groupPicInput && el.groupPicInput.click();
+  }
+
+  if (el.groupPicInput) {
+    el.groupPicInput.onchange = async () => {
+      const file = el.groupPicInput.files && el.groupPicInput.files[0];
+      if (!file) return;
+      toast('Uploading group photo…');
+      try {
+        const fd = new FormData();
+        fd.append('media', file);
+        const res = await fetch(`${BASE}/api/upload`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${state.token}` },
+          body: fd,
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to upload photo');
+        const newAvatarUrl = data.url;
+
+        await api(`/api/conversations/${state.activeConversationId}/avatar`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ avatarUrl: newAvatarUrl }),
+        });
+
+        const conv = state.conversations.find((c) => c.id === state.activeConversationId);
+        if (conv) conv.avatarUrl = newAvatarUrl;
+        renderGroupAvatarPreview();
+        if (conv && conv.id === state.activeConversationId) {
+          renderAvatar(el.convAvatar, conv.name, conv.avatarColor || 0, newAvatarUrl, false);
+        }
+        renderConversations();
+        toast('Group photo updated!');
+      } catch (err) {
+        toast(err.message || 'Could not update group photo.');
+      } finally {
+        el.groupPicInput.value = '';
+      }
+    };
+  }
+
+  if (el.groupRemovePicBtn) {
+    el.groupRemovePicBtn.onclick = async () => {
+      try {
+        await api(`/api/conversations/${state.activeConversationId}/avatar`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ avatarUrl: null }),
+        });
+        const conv = state.conversations.find((c) => c.id === state.activeConversationId);
+        if (conv) conv.avatarUrl = null;
+        renderGroupAvatarPreview();
+        if (conv && conv.id === state.activeConversationId) {
+          el.convAvatar.className = `avatar c-${conv.avatarColor || 0}`;
+          el.convAvatar.textContent = '👥';
+        }
+        renderConversations();
+        toast('Group photo removed.');
+      } catch (err) {
+        toast(err.message || 'Could not remove group photo.');
+      }
+    };
+  }
 
   async function loadGroupMembers() {
     try {
