@@ -245,15 +245,9 @@
             <span>Members</span>
           </button>
           <div class="conv-more-wrap" id="conv-more-wrap" hidden>
-            <button type="button" class="icon-btn conv-more-btn" id="conv-more-btn" title="Chat options" aria-label="Chat options">
+            <button type="button" class="icon-btn conv-more-btn" id="conv-more-btn" title="View chat info" aria-label="View chat info">
               <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/><circle cx="5" cy="12" r="1.5"/></svg>
             </button>
-            <div class="conv-dropdown" id="conv-dropdown" hidden>
-              <button type="button" class="conv-dropdown-item danger" id="delete-conv-btn" title="Delete conversation for you">
-                <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-                <span>Delete Chat</span>
-              </button>
-            </div>
           </div>
         </div>
       </header>
@@ -398,6 +392,149 @@
         </div>
       </div>
     </main>
+
+    <!-- Chat Info Sidepanel (Telegram-style) -->
+    <div class="info-panel-scrim" id="info-panel-scrim" hidden></div>
+    <aside class="chat-info-panel" id="chat-info-panel" aria-label="Conversation info">
+      <!-- Main Profile & Media Counts View (Screenshot 201720 style) -->
+      <div class="info-panel-view" id="info-panel-main">
+        <header class="info-panel-head">
+          <div class="info-panel-head-title">User Info</div>
+          <button type="button" class="icon-btn info-panel-close-btn" id="info-panel-close" title="Close" aria-label="Close">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </header>
+
+        <div class="info-panel-scroll">
+          <!-- Profile Card -->
+          <div class="info-profile-card">
+            <div class="info-avatar-wrap">
+              <span class="avatar u large" id="info-avatar">?</span>
+            </div>
+            <h2 class="info-name" id="info-name">Loading…</h2>
+            <p class="info-status" id="info-status">Offline</p>
+          </div>
+
+          <!-- Quick Actions (Message, Mute, Search, More) -->
+          <div class="info-quick-actions">
+            <button type="button" class="info-action-tile" id="info-act-message">
+              <div class="info-tile-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              </div>
+              <span>Message</span>
+            </button>
+            <button type="button" class="info-action-tile" id="info-act-mute">
+              <div class="info-tile-icon" id="info-mute-icon-wrap">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+              </div>
+              <span id="info-mute-text">Mute</span>
+            </button>
+            <button type="button" class="info-action-tile" id="info-act-search">
+              <div class="info-tile-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              </div>
+              <span>Search</span>
+            </button>
+            <button type="button" class="info-action-tile" id="info-act-more">
+              <div class="info-tile-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/><circle cx="5" cy="12" r="1.5"/></svg>
+              </div>
+              <span>More</span>
+            </button>
+          </div>
+
+          <!-- Contact Details (Mobile / Info) -->
+          <div class="info-section info-contact-section" id="info-contact-section">
+            <div class="info-detail-item">
+              <div class="info-detail-main" id="info-phone-text">+880 17 000 00000</div>
+              <div class="info-detail-sub" id="info-phone-label">Mobile</div>
+            </div>
+            <div class="info-detail-item" id="info-group-desc-wrap" hidden>
+              <div class="info-detail-main" id="info-group-desc-text"></div>
+              <div class="info-detail-sub">Description</div>
+            </div>
+          </div>
+
+          <!-- Shared Media Counters -->
+          <div class="info-section info-media-section">
+            <button type="button" class="info-media-row" id="info-row-photos">
+              <div class="info-row-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+              </div>
+              <span class="info-row-text" id="info-count-photos">0 photos</span>
+              <svg class="info-chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+
+            <button type="button" class="info-media-row" id="info-row-videos">
+              <div class="info-row-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+              </div>
+              <span class="info-row-text" id="info-count-videos">0 videos</span>
+              <svg class="info-chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+
+            <button type="button" class="info-media-row" id="info-row-files">
+              <div class="info-row-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+              </div>
+              <span class="info-row-text" id="info-count-files">0 files</span>
+              <svg class="info-chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+
+            <button type="button" class="info-media-row" id="info-row-voice">
+              <div class="info-row-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+              </div>
+              <span class="info-row-text" id="info-count-voice">0 voice notes</span>
+              <svg class="info-chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+          </div>
+
+          <!-- Danger / Management Actions -->
+          <div class="info-section info-actions-section">
+            <button type="button" class="info-action-row" id="info-act-share">
+              <div class="info-row-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 17 20 12 15 7"/><path d="M4 18v-2a4 4 0 0 1 4-4h12"/></svg>
+              </div>
+              <span>Share this contact</span>
+            </button>
+
+            <button type="button" class="info-action-row" id="info-act-delete-chat">
+              <div class="info-row-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+              </div>
+              <span>Delete chat</span>
+            </button>
+
+            <button type="button" class="info-action-row danger" id="info-act-block">
+              <div class="info-row-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0"/><path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>
+              </div>
+              <span id="info-block-text">Block user</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Shared Media Browser View (Screenshot 202037 style) -->
+      <div class="info-panel-view" id="info-panel-media-view" hidden>
+        <header class="info-panel-head media-browser-head">
+          <button type="button" class="icon-btn info-media-back-btn" id="info-media-back" title="Back" aria-label="Back">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+          </button>
+          <div class="info-media-head-title" id="info-media-title">Photos</div>
+          <div class="info-media-head-actions">
+            <button type="button" class="icon-btn info-panel-close-btn" id="info-media-close" title="Close" aria-label="Close">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+        </header>
+
+        <div class="info-media-content" id="info-media-content">
+          <!-- Populated dynamically with category section and media grid/list -->
+        </div>
+      </div>
+    </aside>
 
   </div>
 
@@ -667,7 +804,12 @@
             <line x1="6" y1="6" x2="18" y2="18"/>
           </svg>
         </button>
-      </div>
+      <button type="button" class="lightbox-nav-btn prev" id="lightbox-prev" title="Previous media (Left arrow)" aria-label="Previous">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+      <button type="button" class="lightbox-nav-btn next" id="lightbox-next" title="Next media (Right arrow)" aria-label="Next">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
       <div class="lightbox-media-container" id="lightbox-media-container">
         <img id="lightbox-img" src="" alt="Enlarged media" hidden>
         <video id="lightbox-video" src="" controls playsinline autoplay hidden></video>

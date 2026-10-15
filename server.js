@@ -1370,6 +1370,115 @@ app.get('/api/conversations/:id/messages', authMiddleware, async (req, res) => {
   }
 });
 
+// Media: Load all shared media for a conversation (Photos, Videos, Files, Voice notes)
+app.get('/api/conversations/:id/media', authMiddleware, async (req, res) => {
+  try {
+    const convId = Number(req.params.id);
+    const memberCheck = await pool.query(
+      'SELECT cleared_at FROM chat_conversation_members WHERE conversation_id = $1 AND user_id = $2',
+      [convId, req.user.id]
+    );
+    if (!memberCheck.rows.length) {
+      return res.status(403).json({ ok: false, error: 'You are not a member of this conversation.' });
+    }
+
+    const clearedAt = memberCheck.rows[0].cleared_at ? new Date(memberCheck.rows[0].cleared_at) : null;
+    let query = `
+      SELECT id, sender_name, sender_id, media_url, media_type, media_name, media_list, created_at
+      FROM chat_messages
+      WHERE conversation_id = $1 AND is_deleted = FALSE AND (media_url IS NOT NULL OR media_list IS NOT NULL)
+    `;
+    const params = [convId];
+    if (clearedAt) {
+      query += ` AND created_at > $2`;
+      params.push(clearedAt);
+    }
+    query += ` ORDER BY id DESC`;
+
+    const { rows } = await pool.query(query, params);
+
+    const photos = [];
+    const videos = [];
+    const files = [];
+    const audio = [];
+
+    for (const r of rows) {
+      const ts = new Date(r.created_at).getTime();
+      let list = null;
+      if (r.media_list) {
+        try {
+          list = typeof r.media_list === 'string' ? JSON.parse(r.media_list) : r.media_list;
+        } catch {}
+      }
+      if (!list || !list.length) {
+        if (r.media_url) {
+          list = [{ url: r.media_url, mediaType: r.media_type, mediaName: r.media_name }];
+        }
+      }
+
+      if (Array.isArray(list)) {
+        for (const item of list) {
+          if (!item || !item.url) continue;
+          const rawType = (item.mediaType || '').toLowerCase();
+          const rawName = (item.mediaName || '').toLowerCase();
+          const url = item.url;
+          const isAudio =
+            rawType === 'audio' ||
+            rawType.startsWith('audio/') ||
+            rawName.includes('voice note') ||
+            /\.(webm|ogg|wav|mp3|m4a|aac|opus)(\?|$)/i.test(url);
+          const isVideo =
+            !isAudio &&
+            (rawType === 'video' ||
+             rawType.startsWith('video/') ||
+             /\.(mp4|mov|mkv)(\?|$)/i.test(url));
+          const isImage =
+            !isAudio && !isVideo &&
+            (rawType === 'image' ||
+             rawType.startsWith('image/') ||
+             /\.(jpg|jpeg|png|gif|webp|svg)(\?|$)/i.test(url));
+
+          const entry = {
+            msgId: Number(r.id),
+            url,
+            mediaType: isAudio ? 'audio' : (isVideo ? 'video' : (isImage ? 'image' : 'file')),
+            mediaName: item.mediaName || (isAudio ? 'Voice Note' : (isVideo ? 'Video' : 'Photo')),
+            senderName: r.sender_name,
+            ts,
+          };
+
+          if (isImage) {
+            photos.push(entry);
+          } else if (isVideo) {
+            videos.push(entry);
+          } else if (isAudio) {
+            audio.push(entry);
+          } else {
+            files.push(entry);
+          }
+        }
+      }
+    }
+
+    res.json({
+      ok: true,
+      photos,
+      videos,
+      files,
+      audio,
+      counts: {
+        photos: photos.length,
+        videos: videos.length,
+        files: files.length,
+        audio: audio.length,
+      },
+    });
+  } catch (err) {
+    console.error('Fetch conversation media failed:', err);
+    res.status(500).json({ ok: false, error: 'Could not load conversation media.' });
+  }
+});
+
 function inspectFileMediaType(file) {
   const mime = (file.mimetype || '').toLowerCase();
   const orig = (file.originalname || '').toLowerCase();
@@ -1570,6 +1679,117 @@ app.post('/api/admin/users/:id/suspend', authMiddleware, adminMiddleware, async 
   }
 });
 
+// Admin: Permanently Delete User Account (and delete their entire chat history & files)
+app.delete('/api/admin/users/:id', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const targetId = Number(req.params.id);
+
+    if (targetId === req.user.id) {
+      return res.status(400).json({ ok: false, error: 'You cannot delete your own admin account.' });
+    }
+
+    const targetUser = await getUserById(targetId);
+    if (!targetUser) {
+      return res.status(404).json({ ok: false, error: 'User not found.' });
+    }
+
+    // 1. Gather all files uploaded by this user in chat messages to unlink from disk
+    const filesToDelete = [];
+    if (targetUser.avatar_url) {
+      filesToDelete.push(targetUser.avatar_url);
+    }
+    const userMsgsRes = await pool.query(
+      'SELECT media_url, media_list FROM chat_messages WHERE sender_id = $1',
+      [targetId]
+    );
+    for (const r of userMsgsRes.rows) {
+      if (r.media_url) filesToDelete.push(r.media_url);
+      if (r.media_list) {
+        try {
+          const list = typeof r.media_list === 'string' ? JSON.parse(r.media_list) : r.media_list;
+          if (Array.isArray(list)) {
+            list.forEach((m) => { if (m && m.url) filesToDelete.push(m.url); });
+          }
+        } catch {}
+      }
+    }
+
+    // Also gather direct conversations where target user is participant to delete their files too
+    const directConvsRes = await pool.query(
+      `SELECT c.id FROM chat_conversations c
+       JOIN chat_conversation_members m ON c.id = m.conversation_id
+       WHERE c.type = 'direct' AND m.user_id = $1`,
+      [targetId]
+    );
+    const directConvIds = directConvsRes.rows.map((r) => Number(r.id));
+    if (directConvIds.length > 0) {
+      const placeholders = directConvIds.map((_, i) => `$${i + 1}`).join(',');
+      const directMsgsRes = await pool.query(
+        `SELECT media_url, media_list FROM chat_messages WHERE conversation_id IN (${placeholders})`,
+        directConvIds
+      );
+      for (const r of directMsgsRes.rows) {
+        if (r.media_url) filesToDelete.push(r.media_url);
+        if (r.media_list) {
+          try {
+            const list = typeof r.media_list === 'string' ? JSON.parse(r.media_list) : r.media_list;
+            if (Array.isArray(list)) {
+              list.forEach((m) => { if (m && m.url) filesToDelete.push(m.url); });
+            }
+          } catch {}
+        }
+      }
+    }
+
+    // Unlink all accumulated files from disk
+    for (const mUrl of filesToDelete) {
+      try {
+        const parts = mUrl.split('/static/uploads/');
+        if (parts.length > 1) {
+          const filePath = path.join(UPLOADS_DIR, path.basename(parts[1]));
+          if (fs.existsSync(filePath)) await fs.promises.unlink(filePath);
+        }
+      } catch (e) {}
+    }
+
+    // 2. Delete all direct conversations where this user participated
+    if (directConvIds.length > 0) {
+      const placeholders = directConvIds.map((_, i) => `$${i + 1}`).join(',');
+      await pool.query(`DELETE FROM chat_conversations WHERE id IN (${placeholders})`, directConvIds);
+    }
+
+    // 3. Delete messages sent by user in remaining conversations (like groups)
+    await pool.query('DELETE FROM chat_messages WHERE sender_id = $1', [targetId]);
+
+    // 4. Delete friend requests and friends relationships
+    await pool.query('DELETE FROM chat_friend_requests WHERE sender_id = $1 OR receiver_id = $1', [targetId]);
+    await pool.query('DELETE FROM chat_friends WHERE user_id = $1 OR friend_id = $1', [targetId]);
+
+    // 5. Delete group memberships
+    await pool.query('DELETE FROM chat_conversation_members WHERE user_id = $1', [targetId]);
+
+    // 6. Delete the user row
+    await pool.query('DELETE FROM chat_users WHERE id = $1', [targetId]);
+
+    // 7. Disconnect active sockets for this user immediately
+    for (const [socketId, socket] of io.sockets.sockets) {
+      if (socket.user && socket.user.id === targetId) {
+        socket.emit('account_deleted');
+        socket.disconnect(true);
+      }
+    }
+    onlineUsers.delete(targetId);
+
+    // Notify other connected clients to refresh conversations/friends
+    io.emit('user_deleted', { userId: targetId });
+
+    res.json({ ok: true, targetId, message: `User ${targetUser.name} and all their chat data were permanently deleted.` });
+  } catch (err) {
+    console.error('Admin delete user error:', err);
+    res.status(500).json({ ok: false, error: 'Could not delete user account.' });
+  }
+});
+
 // Admin: List all conversations for audit
 app.get('/api/admin/conversations', authMiddleware, adminMiddleware, async (req, res) => {
   try {
@@ -1752,6 +1972,7 @@ io.on('connection', async (socket) => {
   // Send message
   socket.on('message', async (payload, ack) => {
     const reply = typeof ack === 'function' ? ack : () => {};
+    const tempId = payload && payload.tempId ? String(payload.tempId) : null;
     const convId = Number(payload && payload.conversationId);
     const text = String((payload && payload.text) || '').trim();
     const mediaList = (payload && Array.isArray(payload.mediaList) && payload.mediaList.length > 0) ? payload.mediaList : null;
@@ -1823,6 +2044,7 @@ io.on('connection', async (socket) => {
 
       const msg = {
         id: Number(msgRes.rows[0].id),
+        tempId,
         conversationId: convId,
         senderId: user.id,
         senderName: user.name,
@@ -1870,7 +2092,7 @@ io.on('connection', async (socket) => {
         });
       }
 
-      reply({ ok: true, id: msg.id });
+      reply({ ok: true, id: msg.id, tempId });
     } catch (err) {
       console.error('Socket message failed:', err);
       reply({ ok: false, error: 'Failed to send message.' });

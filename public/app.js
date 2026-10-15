@@ -150,8 +150,45 @@
     lightboxVideo: $('lightbox-video'),
     lightboxDownloadBtn: $('lightbox-download-btn'),
     lightboxClose: $('lightbox-close'),
+    lightboxPrev: $('lightbox-prev'),
+    lightboxNext: $('lightbox-next'),
     lightboxGalleryWrap: $('lightbox-gallery-wrap'),
     lightboxGallery: $('lightbox-gallery'),
+
+    // Chat Info Sidepanel & Shared Media Browser (Telegram-style)
+    chatInfoPanel: $('chat-info-panel'),
+    infoPanelScrim: $('info-panel-scrim'),
+    infoPanelMain: $('info-panel-main'),
+    infoPanelMediaView: $('info-panel-media-view'),
+    infoPanelClose: $('info-panel-close'),
+    infoMediaClose: $('info-media-close'),
+    infoMediaBack: $('info-media-back'),
+    infoMediaTitle: $('info-media-title'),
+    infoMediaContent: $('info-media-content'),
+    infoAvatar: $('info-avatar'),
+    infoName: $('info-name'),
+    infoStatus: $('info-status'),
+    infoPhoneText: $('info-phone-text'),
+    infoPhoneLabel: $('info-phone-label'),
+    infoGroupDescWrap: $('info-group-desc-wrap'),
+    infoGroupDescText: $('info-group-desc-text'),
+    infoActMessage: $('info-act-message'),
+    infoActMute: $('info-act-mute'),
+    infoMuteText: $('info-mute-text'),
+    infoActSearch: $('info-act-search'),
+    infoActMore: $('info-act-more'),
+    infoRowPhotos: $('info-row-photos'),
+    infoRowVideos: $('info-row-videos'),
+    infoRowFiles: $('info-row-files'),
+    infoRowVoice: $('info-row-voice'),
+    infoCountPhotos: $('info-count-photos'),
+    infoCountVideos: $('info-count-videos'),
+    infoCountFiles: $('info-count-files'),
+    infoCountVoice: $('info-count-voice'),
+    infoActShare: $('info-act-share'),
+    infoActDeleteChat: $('info-act-delete-chat'),
+    infoActBlock: $('info-act-block'),
+    infoBlockText: $('info-block-text'),
 
     adminDialog: $('admin-dialog'),
     statUsers: $('stat-users'),
@@ -376,6 +413,26 @@
       osc.frequency.exponentialRampToValueAtTime(380, now + 0.08);
       gain.gain.setValueAtTime(0.08, now);
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.12);
+    } catch {}
+  }
+
+  // Message deletion sound: crisp, satisfying pop
+  function playDeletePopSound() {
+    try {
+      const ctx = getAudioContext();
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(820, now);
+      osc.frequency.exponentialRampToValueAtTime(110, now + 0.11);
+      gain.gain.setValueAtTime(0.35, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.11);
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.start(now);
@@ -965,6 +1022,20 @@
       loadConversations();
       toast('You were added to a new conversation!');
     });
+
+    socket.on('account_deleted', () => {
+      toast('Your account was deleted by an administrator.');
+      logout();
+    });
+
+    socket.on('user_deleted', () => {
+      loadConversations();
+      loadFriends();
+      if (state.user && state.user.is_admin) {
+        loadAdminUsers();
+        loadAdminStats();
+      }
+    });
   }
 
   let searchTerm = '';
@@ -1173,9 +1244,10 @@
       el.convSub.textContent = `${conv.phone} • ${conv.isOnline ? 'Online' : 'Offline'}`;
       el.manageGroupBtn.hidden = true;
     }
+    closeChatInfoPanel();
     if (el.convMoreWrap) el.convMoreWrap.hidden = false;
     if (el.convDropdown) el.convDropdown.hidden = true;
-    el.deleteConvBtn.hidden = false;
+    if (el.deleteConvBtn) el.deleteConvBtn.hidden = false;
 
     el.input.disabled = false;
     el.send.disabled = false;
@@ -1237,6 +1309,7 @@
   }
 
   function removeMessageRow(id) {
+    playDeletePopSound();
     state.messagesCache.delete(id);
     if (state.selectedMessageIds.has(id)) {
       state.selectedMessageIds.delete(id);
@@ -1244,15 +1317,13 @@
     }
     const row = $(`msg-${id}`);
     if (row) {
-      row.style.transition = 'opacity 0.22s ease, transform 0.22s ease, max-height 0.25s ease';
-      row.style.opacity = '0';
-      row.style.transform = 'scale(0.95)';
+      row.classList.add('pop-deleting');
       setTimeout(() => {
         row.remove();
         if (el.messages && el.messages.children.length === 0) {
           el.emptyState.hidden = false;
         }
-      }, 220);
+      }, 240);
     }
   }
 
@@ -1294,6 +1365,19 @@
     el.emptyState.hidden = true;
     state.messagesCache.set(msg.id, msg);
 
+    // If replacing an optimistic uploading row
+    let existingOptRow = null;
+    if (msg.tempId) {
+      existingOptRow = $(`msg-${msg.tempId}`);
+      if (existingOptRow) {
+        const cached = state.messagesCache.get(msg.tempId);
+        if (cached && Array.isArray(cached.blobUrls)) {
+          cached.blobUrls.forEach((u) => { try { URL.revokeObjectURL(u); } catch (e) {} });
+        }
+        state.messagesCache.delete(msg.tempId);
+      }
+    }
+
     const isOwn = msg.senderId === state.user.id;
     const isSystem = msg.senderName === 'System';
 
@@ -1310,7 +1394,11 @@
       bubble.className = 'system-bubble';
       bubble.textContent = msg.text;
       li.appendChild(bubble);
-      el.messages.appendChild(li);
+      if (existingOptRow) {
+        existingOptRow.replaceWith(li);
+      } else {
+        el.messages.appendChild(li);
+      }
       return;
     }
 
@@ -1409,6 +1497,8 @@
           mediaName: msg.mediaName || msg.media_name,
         }] : []);
 
+    const isUploading = msg.status === 'uploading';
+
     if (rawMediaList.length > 1) {
       if (!msg.text) {
         bubble.classList.add('has-media-only');
@@ -1424,6 +1514,10 @@
         collage.className = 'msg-media-collage collage-3';
       } else {
         collage.className = 'msg-media-collage collage-4';
+      }
+
+      if (isUploading) {
+        collage.classList.add('uploading-skeleton');
       }
 
       const displayItems = rawMediaList.slice(0, 4);
@@ -1462,9 +1556,18 @@
           itemEl.appendChild(overlay);
         }
 
+        if (isUploading) {
+          const spin = document.createElement('div');
+          spin.className = 'upload-spinner-wrap';
+          spin.innerHTML = '<div class="upload-spinner-ring"></div>';
+          itemEl.appendChild(spin);
+        }
+
         itemEl.onclick = (e) => {
           e.stopPropagation();
-          openLightbox(item);
+          if (!isUploading) {
+            openLightbox(item, rawMediaList);
+          }
         };
 
         collage.appendChild(itemEl);
@@ -1490,6 +1593,9 @@
          /\.(mp4|mov|mkv)(\?|$)/i.test(mediaUrl));
 
       const mediaDiv = document.createElement('div');
+      if (isUploading) {
+        mediaDiv.classList.add('uploading-skeleton');
+      }
 
       if (isAudio) {
         bubble.classList.add('has-audio');
@@ -1526,9 +1632,19 @@
         img.src = mediaUrl;
         img.alt = singleItem.mediaName || 'Photo';
         img.loading = 'lazy';
-        img.onclick = () => openLightbox(singleItem);
+        img.onclick = () => {
+          if (!isUploading) openLightbox(singleItem, [singleItem]);
+        };
         mediaDiv.appendChild(img);
       }
+
+      if (isUploading) {
+        const spin = document.createElement('div');
+        spin.className = 'upload-spinner-wrap';
+        spin.innerHTML = '<div class="upload-spinner-ring"></div><span class="upload-spinner-label">Uploading…</span>';
+        mediaDiv.appendChild(spin);
+      }
+
       bubble.appendChild(mediaDiv);
     }
 
@@ -1776,7 +1892,12 @@
     }
 
     li.appendChild(bodyDiv);
-    el.messages.appendChild(li);
+
+    if (existingOptRow) {
+      existingOptRow.replaceWith(li);
+    } else {
+      el.messages.appendChild(li);
+    }
   }
 
   async function deleteMessage(msgId) {
@@ -2195,6 +2316,8 @@
   }
 
   let currentLightboxMedia = null;
+  let lightboxPlaylist = [];
+  let lightboxIndex = 0;
 
   function getChatMediaItems() {
     const list = [];
@@ -2277,12 +2400,28 @@
         }
       });
     }
+
+    const hasMultiple = lightboxPlaylist.length > 1;
+    if (el.lightboxPrev) el.lightboxPrev.style.display = hasMultiple ? 'flex' : 'none';
+    if (el.lightboxNext) el.lightboxNext.style.display = hasMultiple ? 'flex' : 'none';
+  }
+
+  function nextLightboxItem() {
+    if (!lightboxPlaylist.length) return;
+    lightboxIndex = (lightboxIndex + 1) % lightboxPlaylist.length;
+    displayLightboxItem(lightboxPlaylist[lightboxIndex]);
+  }
+
+  function prevLightboxItem() {
+    if (!lightboxPlaylist.length) return;
+    lightboxIndex = (lightboxIndex - 1 + lightboxPlaylist.length) % lightboxPlaylist.length;
+    displayLightboxItem(lightboxPlaylist[lightboxIndex]);
   }
 
   function renderLightboxGallery(activeUrl) {
     if (!el.lightboxGallery) return;
     el.lightboxGallery.replaceChildren();
-    const mediaItems = getChatMediaItems();
+    const mediaItems = lightboxPlaylist && lightboxPlaylist.length > 0 ? lightboxPlaylist : getChatMediaItems();
 
     if (mediaItems.length <= 1) {
       if (el.lightboxGalleryWrap) el.lightboxGalleryWrap.hidden = true;
@@ -2291,7 +2430,7 @@
 
     if (el.lightboxGalleryWrap) el.lightboxGalleryWrap.hidden = false;
 
-    mediaItems.forEach((item) => {
+    mediaItems.forEach((item, idx) => {
       const thumb = document.createElement('div');
       thumb.className = `lightbox-gallery-thumb ${item.url === activeUrl ? 'active' : ''}`;
       thumb.dataset.url = item.url;
@@ -2318,6 +2457,7 @@
 
       thumb.onclick = (e) => {
         e.stopPropagation();
+        lightboxIndex = idx;
         displayLightboxItem(item);
       };
 
@@ -2325,14 +2465,27 @@
     });
   }
 
-  function openLightbox(media) {
+  function openLightbox(media, customPlaylist = null) {
     const item = typeof media === 'string'
       ? { url: media, mediaType: 'image', mediaName: 'Media' }
       : media;
     if (!item || !item.url) return;
 
-    displayLightboxItem(item);
-    renderLightboxGallery(item.url);
+    if (Array.isArray(customPlaylist) && customPlaylist.length > 0) {
+      lightboxPlaylist = customPlaylist.map((m) => typeof m === 'string' ? { url: m, mediaType: 'image', mediaName: 'Photo' } : m);
+    } else {
+      lightboxPlaylist = getChatMediaItems();
+    }
+
+    if (!lightboxPlaylist.length) {
+      lightboxPlaylist = [item];
+    }
+
+    const foundIdx = lightboxPlaylist.findIndex((p) => p.url === item.url);
+    lightboxIndex = foundIdx >= 0 ? foundIdx : 0;
+
+    displayLightboxItem(lightboxPlaylist[lightboxIndex]);
+    renderLightboxGallery(lightboxPlaylist[lightboxIndex].url);
     if (el.lightboxDialog && !el.lightboxDialog.open) {
       el.lightboxDialog.showModal();
     }
@@ -2350,6 +2503,61 @@
     if (el.lightboxDialog && el.lightboxDialog.open) {
       el.lightboxDialog.close();
     }
+  }
+
+  if (el.lightboxPrev) {
+    el.lightboxPrev.onclick = (e) => {
+      e.stopPropagation();
+      prevLightboxItem();
+    };
+  }
+
+  if (el.lightboxNext) {
+    el.lightboxNext.onclick = (e) => {
+      e.stopPropagation();
+      nextLightboxItem();
+    };
+  }
+
+  // Keyboard navigation for Lightbox
+  document.addEventListener('keydown', (e) => {
+    if (el.lightboxDialog && el.lightboxDialog.open) {
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        prevLightboxItem();
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        nextLightboxItem();
+      } else if (e.key === 'Escape') {
+        closeLightbox();
+      }
+    }
+  });
+
+  // Touch swipe support for mobile in Lightbox
+  if (el.lightboxMediaContainer) {
+    let touchStartX = 0;
+    let touchStartY = 0;
+    el.lightboxMediaContainer.addEventListener('touchstart', (e) => {
+      if (e.touches && e.touches.length === 1) {
+        touchStartX = e.touches[0].clientX;
+        touchStartY = e.touches[0].clientY;
+      }
+    }, { passive: true });
+
+    el.lightboxMediaContainer.addEventListener('touchend', (e) => {
+      if (e.changedTouches && e.changedTouches.length === 1) {
+        const dx = e.changedTouches[0].clientX - touchStartX;
+        const dy = e.changedTouches[0].clientY - touchStartY;
+        if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) {
+          if (dx > 0) {
+            prevLightboxItem();
+          } else {
+            nextLightboxItem();
+          }
+        }
+      }
+    }, { passive: true });
   }
 
   if (el.lightboxDownloadBtn) {
@@ -2383,6 +2591,23 @@
     });
   }
 
+  function markOptimisticError(tempId) {
+    const row = $(`msg-${tempId}`);
+    if (row) {
+      const bubble = row.querySelector('.bubble');
+      if (bubble) {
+        const errTag = document.createElement('div');
+        errTag.style.color = '#ef4444';
+        errTag.style.fontSize = '0.75rem';
+        errTag.style.marginTop = '4px';
+        errTag.textContent = 'Upload failed. Please try again.';
+        bubble.appendChild(errTag);
+      }
+      const spinner = row.querySelector('.upload-spinner-wrap');
+      if (spinner) spinner.remove();
+    }
+  }
+
   /* ------------------------------------------------------------- sending */
   el.composer.onsubmit = async (e) => {
     e.preventDefault();
@@ -2390,85 +2615,133 @@
 
     const text = el.input.value.trim();
     const filesToSend = (state.selectedFiles && state.selectedFiles.length > 0)
-      ? state.selectedFiles
+      ? [...state.selectedFiles]
       : (state.selectedFile ? [state.selectedFile] : []);
 
     if (!text && !filesToSend.length) return;
 
-    el.send.disabled = true;
+    const activeConvId = state.activeConversationId;
+    const replyTarget = state.replyTarget ? { ...state.replyTarget } : null;
 
-    try {
-      if (filesToSend.length > 0) {
-        toast(`Uploading ${filesToSend.length} media file${filesToSend.length > 1 ? 's' : ''}…`);
-        const fd = new FormData();
-        for (const file of filesToSend) {
-          fd.append('media', file);
+    // Reset input and attachments immediately so the user can keep typing without waiting!
+    el.input.value = '';
+    clearMediaSelection();
+    cancelReply();
+    playSendSound();
+    el.input.focus();
+
+    // 1. Text-only message
+    if (!filesToSend.length) {
+      const payload = {
+        conversationId: activeConvId,
+        text,
+        mediaUrl: null,
+        mediaType: null,
+        mediaName: null,
+      };
+
+      if (replyTarget) {
+        payload.replyToId = replyTarget.id;
+        payload.replyToSender = replyTarget.senderName;
+        payload.replyToText = replyTarget.text;
+      }
+
+      socket.emit('message', payload, (ack) => {
+        if (ack && !ack.ok) {
+          toast(ack.error || 'Failed to send message');
+        }
+      });
+      return;
+    }
+
+    // 2. Media sending: Optimistic rendering with blurred skeleton and loading spinner
+    const tempId = 'opt-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+    const localPreviews = filesToSend.map((file) => {
+      const url = URL.createObjectURL(file);
+      const isVid = file.type && file.type.startsWith('video/');
+      const isAud = file.type && file.type.startsWith('audio/');
+      return {
+        url,
+        mediaType: isAud ? 'audio' : (isVid ? 'video' : 'image'),
+        mediaName: file.name,
+        size: file.size,
+        file,
+      };
+    });
+
+    const optMsg = {
+      id: tempId,
+      tempId,
+      conversationId: activeConvId,
+      senderId: state.user.id,
+      senderName: state.user.name,
+      text,
+      mediaUrl: localPreviews[0].url,
+      mediaType: localPreviews[0].mediaType,
+      mediaName: localPreviews[0].mediaName,
+      mediaList: localPreviews.map((m) => ({ url: m.url, mediaType: m.mediaType, mediaName: m.mediaName })),
+      replyToId: replyTarget ? replyTarget.id : null,
+      replyToSender: replyTarget ? replyTarget.senderName : null,
+      replyToText: replyTarget ? replyTarget.text : null,
+      status: 'uploading',
+      ts: Date.now(),
+      isOptimistic: true,
+      blobUrls: localPreviews.map((m) => m.url),
+    };
+
+    appendMessage(optMsg);
+    scrollToBottom();
+
+    // Send photo/media one by one in the background
+    (async () => {
+      try {
+        const uploadedList = [];
+        for (let i = 0; i < localPreviews.length; i++) {
+          const item = localPreviews[i];
+          const fd = new FormData();
+          fd.append('media', item.file);
+
+          const uploadRes = await fetch(`${BASE}/api/upload`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${state.token}` },
+            body: fd,
+          });
+
+          const data = await uploadRes.json();
+          if (!uploadRes.ok) throw new Error(data.error || 'Upload failed');
+          uploadedList.push({
+            url: data.url,
+            mediaType: data.mediaType,
+            mediaName: data.mediaName,
+            size: data.size,
+          });
         }
 
-        const endpoint = filesToSend.length > 1 ? `${BASE}/api/upload-multiple` : `${BASE}/api/upload`;
-        const uploadRes = await fetch(endpoint, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${state.token}` },
-          body: fd,
-        });
-
-        const data = await uploadRes.json();
-        if (!uploadRes.ok) throw new Error(data.error || 'Media upload failed');
-
-        const uploadedList = data.files || [{ url: data.url, mediaType: data.mediaType, mediaName: data.mediaName }];
-
         const payload = {
-          conversationId: state.activeConversationId,
+          tempId,
+          conversationId: activeConvId,
           text,
           mediaUrl: uploadedList[0].url,
           mediaType: uploadedList[0].mediaType,
           mediaName: uploadedList[0].mediaName,
           mediaList: uploadedList,
+          replyToId: optMsg.replyToId,
+          replyToSender: optMsg.replyToSender,
+          replyToText: optMsg.replyToText,
         };
-
-        if (state.replyTarget) {
-          payload.replyToId = state.replyTarget.id;
-          payload.replyToSender = state.replyTarget.senderName;
-          payload.replyToText = state.replyTarget.text;
-        }
 
         socket.emit('message', payload, (ack) => {
           if (ack && !ack.ok) {
             toast(ack.error || 'Failed to send message');
+            markOptimisticError(tempId);
           }
         });
-      } else {
-        const payload = {
-          conversationId: state.activeConversationId,
-          text,
-          mediaUrl: null,
-          mediaType: null,
-          mediaName: null,
-        };
-
-        if (state.replyTarget) {
-          payload.replyToId = state.replyTarget.id;
-          payload.replyToSender = state.replyTarget.senderName;
-          payload.replyToText = state.replyTarget.text;
-        }
-
-        socket.emit('message', payload, (ack) => {
-          if (ack && !ack.ok) {
-            toast(ack.error || 'Failed to send message');
-          }
-        });
+      } catch (uploadErr) {
+        console.error('Optimistic upload failed:', uploadErr);
+        toast(`Upload failed: ${uploadErr.message}`);
+        markOptimisticError(tempId);
       }
-
-      playSendSound();
-      el.input.value = '';
-      clearMediaSelection();
-      cancelReply();
-    } catch (err) {
-      toast(err.message);
-    } finally {
-      el.send.disabled = false;
-      el.input.focus();
-    }
+    })();
   };
 
   // Enter to send message, Shift+Enter for newline
@@ -3259,14 +3532,293 @@
     }
   };
 
-  /* ------------------------------------------------------------- delete conversation ("delete for me") */
+  /* ------------------------------------------------------------- Telegram-style Chat Info Sidepanel & Shared Media Browser */
+  let cachedConversationMedia = null;
+
+  async function openChatInfoPanel() {
+    if (!state.activeConversationId) return;
+    const conv = state.conversations.find((c) => c.id === state.activeConversationId);
+    if (!conv) return;
+
+    // Reset views: show main profile info view, hide media view
+    if (el.infoPanelMain) el.infoPanelMain.hidden = false;
+    if (el.infoPanelMediaView) el.infoPanelMediaView.hidden = true;
+
+    // Populate profile card
+    if (el.infoName) el.infoName.textContent = conv.name;
+
+    if (conv.type === 'group') {
+      if (el.infoAvatar) {
+        el.infoAvatar.className = `avatar c-${conv.avatarColor || 0} large`;
+        el.infoAvatar.textContent = '👥';
+      }
+      if (el.infoStatus) el.infoStatus.textContent = `${conv.memberCount || 1} members`;
+      if (el.infoPhoneText) el.infoPhoneText.textContent = `${conv.memberCount || 1} members in group`;
+      if (el.infoPhoneLabel) el.infoPhoneLabel.textContent = 'Group Info';
+      if (el.infoActBlock) el.infoActBlock.hidden = true;
+      if (el.infoGroupDescWrap) el.infoGroupDescWrap.hidden = true;
+    } else {
+      if (el.infoAvatar) {
+        renderAvatar(el.infoAvatar, conv.name, conv.avatarColor, conv.avatarUrl, conv.isOnline);
+        el.infoAvatar.classList.add('large');
+      }
+      if (el.infoStatus) {
+        el.infoStatus.textContent = conv.isOnline ? 'online' : 'offline';
+        el.infoStatus.className = `info-status ${conv.isOnline ? 'online' : ''}`;
+      }
+      if (el.infoPhoneText) el.infoPhoneText.textContent = conv.phone || 'Mobile';
+      if (el.infoPhoneLabel) el.infoPhoneLabel.textContent = 'Mobile';
+      if (el.infoActBlock) el.infoActBlock.hidden = false;
+      if (el.infoGroupDescWrap) el.infoGroupDescWrap.hidden = true;
+    }
+
+    // Reset counts to loading
+    if (el.infoCountPhotos) el.infoCountPhotos.textContent = '…';
+    if (el.infoCountVideos) el.infoCountVideos.textContent = '…';
+    if (el.infoCountFiles) el.infoCountFiles.textContent = '…';
+    if (el.infoCountVoice) el.infoCountVoice.textContent = '…';
+
+    // Slide open sidepanel
+    if (el.chatInfoPanel) el.chatInfoPanel.classList.add('open');
+    if (el.infoPanelScrim) {
+      el.infoPanelScrim.hidden = false;
+      setTimeout(() => el.infoPanelScrim.classList.add('visible'), 10);
+    }
+
+    // Load media counts from API
+    try {
+      const data = await api(`/api/conversations/${conv.id}/media`);
+      cachedConversationMedia = data;
+      const counts = data.counts || { photos: 0, videos: 0, files: 0, audio: 0 };
+      if (el.infoCountPhotos) el.infoCountPhotos.textContent = `${counts.photos} photo${counts.photos === 1 ? '' : 's'}`;
+      if (el.infoCountVideos) el.infoCountVideos.textContent = `${counts.videos} video${counts.videos === 1 ? '' : 's'}`;
+      if (el.infoCountFiles) el.infoCountFiles.textContent = `${counts.files} file${counts.files === 1 ? '' : 's'}`;
+      if (el.infoCountVoice) el.infoCountVoice.textContent = `${counts.audio} voice note${counts.audio === 1 ? '' : 's'}`;
+    } catch (e) {
+      console.error('Failed to load conversation media:', e);
+      if (el.infoCountPhotos) el.infoCountPhotos.textContent = '0 photos';
+      if (el.infoCountVideos) el.infoCountVideos.textContent = '0 videos';
+      if (el.infoCountFiles) el.infoCountFiles.textContent = '0 files';
+      if (el.infoCountVoice) el.infoCountVoice.textContent = '0 voice notes';
+    }
+  }
+
+  function closeChatInfoPanel() {
+    if (el.chatInfoPanel) el.chatInfoPanel.classList.remove('open');
+    if (el.infoPanelScrim) {
+      el.infoPanelScrim.classList.remove('visible');
+      setTimeout(() => { el.infoPanelScrim.hidden = true; }, 260);
+    }
+  }
+
+  function openSharedMediaBrowser(category) {
+    if (!el.infoPanelMain || !el.infoPanelMediaView) return;
+    el.infoPanelMain.hidden = true;
+    el.infoPanelMediaView.hidden = false;
+
+    const titles = {
+      photos: 'Photos',
+      videos: 'Videos',
+      files: 'Files',
+      audio: 'Voice notes',
+    };
+    if (el.infoMediaTitle) el.infoMediaTitle.textContent = titles[category] || 'Media';
+    renderSharedMediaCategory(category);
+  }
+
+  function renderSharedMediaCategory(category) {
+    if (!el.infoMediaContent) return;
+    el.infoMediaContent.replaceChildren();
+
+    const mediaData = cachedConversationMedia || { photos: [], videos: [], files: [], audio: [] };
+    const items = mediaData[category] || [];
+
+    if (!items.length) {
+      const notice = document.createElement('div');
+      notice.className = 'media-empty-notice';
+      notice.textContent = `No ${category === 'audio' ? 'voice notes' : category} in this chat yet.`;
+      el.infoMediaContent.appendChild(notice);
+      return;
+    }
+
+    const titleSec = document.createElement('div');
+    titleSec.className = 'media-browser-section-title';
+    titleSec.textContent = `Shared ${category === 'audio' ? 'Voice Notes' : category.toUpperCase()} (${items.length})`;
+    el.infoMediaContent.appendChild(titleSec);
+
+    if (category === 'photos' || category === 'videos') {
+      const grid = document.createElement('div');
+      grid.className = 'media-browser-grid';
+      items.forEach((item) => {
+        const thumb = document.createElement('div');
+        thumb.className = 'media-browser-thumb';
+        if (category === 'videos') {
+          const vid = document.createElement('video');
+          vid.src = item.url;
+          vid.preload = 'metadata';
+          vid.muted = true;
+          const badge = document.createElement('div');
+          badge.className = 'thumb-vid-badge';
+          badge.innerHTML = '<svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>';
+          thumb.append(vid, badge);
+        } else {
+          const img = document.createElement('img');
+          img.src = item.url;
+          img.alt = item.mediaName || 'Photo';
+          img.loading = 'lazy';
+          thumb.appendChild(img);
+        }
+
+        thumb.onclick = () => {
+          openLightbox(item, items);
+        };
+        grid.appendChild(thumb);
+      });
+      el.infoMediaContent.appendChild(grid);
+    } else if (category === 'files') {
+      items.forEach((item) => {
+        const fileCard = document.createElement('div');
+        fileCard.className = 'media-file-item';
+        fileCard.innerHTML = `
+          <div class="media-file-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+          </div>
+          <div class="media-file-info">
+            <div class="media-file-name">${escapeHtml(item.mediaName || 'File')}</div>
+            <div class="media-file-meta">${formatShortTime(item.ts)}</div>
+          </div>
+        `;
+        fileCard.onclick = () => downloadMediaFile(item.url, item.mediaName);
+        el.infoMediaContent.appendChild(fileCard);
+      });
+    } else if (category === 'audio') {
+      items.forEach((item) => {
+        const audioCard = document.createElement('div');
+        audioCard.className = 'media-file-item';
+        audioCard.style.flexDirection = 'column';
+        audioCard.style.alignItems = 'stretch';
+        audioCard.innerHTML = `
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+            <div class="media-file-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+            </div>
+            <div>
+              <div class="media-file-name">${escapeHtml(item.senderName || 'Voice Note')}</div>
+              <div class="media-file-meta">${formatShortTime(item.ts)}</div>
+            </div>
+          </div>
+          <audio src="${item.url}" controls preload="none" style="width:100%;height:36px;"></audio>
+        `;
+        el.infoMediaContent.appendChild(audioCard);
+      });
+    }
+  }
+
+  // Open sidepanel from header options button or header details
   if (el.convMoreBtn) {
     el.convMoreBtn.onclick = (e) => {
       e.stopPropagation();
-      const willOpen = el.convDropdown ? el.convDropdown.hidden : false;
-      closeAllDropdowns();
-      if (el.convDropdown && willOpen) {
-        el.convDropdown.hidden = false;
+      openChatInfoPanel();
+    };
+  }
+
+  const headerDetails = document.querySelector('.conv-details');
+  if (headerDetails) {
+    headerDetails.style.cursor = 'pointer';
+    headerDetails.onclick = () => {
+      if (state.activeConversationId) openChatInfoPanel();
+    };
+  }
+
+  if (el.infoPanelClose) {
+    el.infoPanelClose.onclick = () => closeChatInfoPanel();
+  }
+  if (el.infoMediaClose) {
+    el.infoMediaClose.onclick = () => closeChatInfoPanel();
+  }
+  if (el.infoPanelScrim) {
+    el.infoPanelScrim.onclick = () => closeChatInfoPanel();
+  }
+  if (el.infoMediaBack) {
+    el.infoMediaBack.onclick = () => {
+      if (el.infoPanelMediaView) el.infoPanelMediaView.hidden = true;
+      if (el.infoPanelMain) el.infoPanelMain.hidden = false;
+    };
+  }
+
+  // Media counters click handlers
+  if (el.infoRowPhotos) el.infoRowPhotos.onclick = () => openSharedMediaBrowser('photos');
+  if (el.infoRowVideos) el.infoRowVideos.onclick = () => openSharedMediaBrowser('videos');
+  if (el.infoRowFiles) el.infoRowFiles.onclick = () => openSharedMediaBrowser('files');
+  if (el.infoRowVoice) el.infoRowVoice.onclick = () => openSharedMediaBrowser('audio');
+
+  // Quick action tile handlers
+  if (el.infoActMessage) {
+    el.infoActMessage.onclick = () => {
+      closeChatInfoPanel();
+      if (el.input) el.input.focus();
+    };
+  }
+
+  let isMuted = false;
+  if (el.infoActMute) {
+    el.infoActMute.onclick = () => {
+      isMuted = !isMuted;
+      if (el.infoMuteText) el.infoMuteText.textContent = isMuted ? 'Unmute' : 'Mute';
+      toast(isMuted ? 'Conversation muted' : 'Conversation unmuted');
+    };
+  }
+
+  if (el.infoActSearch) {
+    el.infoActSearch.onclick = () => {
+      closeChatInfoPanel();
+      if (el.railSearchInput) el.railSearchInput.focus();
+    };
+  }
+
+  if (el.infoActMore) {
+    el.infoActMore.onclick = () => {
+      if (el.infoActDeleteChat) el.infoActDeleteChat.scrollIntoView({ behavior: 'smooth' });
+    };
+  }
+
+  // Bottom action buttons in sidepanel
+  if (el.infoActShare) {
+    el.infoActShare.onclick = async () => {
+      const conv = state.conversations.find((c) => c.id === state.activeConversationId);
+      if (conv) {
+        try {
+          await navigator.clipboard.writeText(`${conv.name} (${conv.phone || ''})`);
+          toast('Contact copied to clipboard');
+        } catch {
+          toast('Contact shared');
+        }
+      }
+    };
+  }
+
+  if (el.infoActDeleteChat) {
+    el.infoActDeleteChat.onclick = () => {
+      closeChatInfoPanel();
+      if (!state.activeConversationId) return;
+      if (el.deleteConvDialog) el.deleteConvDialog.showModal();
+    };
+  }
+
+  if (el.infoActBlock) {
+    el.infoActBlock.onclick = async () => {
+      const conv = state.conversations.find((c) => c.id === state.activeConversationId);
+      if (!conv || !conv.otherUserId) return;
+      if (confirm(`Block ${conv.name}? You will no longer receive messages from this contact.`)) {
+        try {
+          await api(`/api/friends/${conv.otherUserId}`, { method: 'DELETE' });
+          toast(`Blocked ${conv.name}`);
+          closeChatInfoPanel();
+          loadFriends();
+          loadConversations();
+        } catch (e) {
+          toast(e.message);
+        }
       }
     };
   }
@@ -3288,6 +3840,7 @@
         await api(`/api/conversations/${convId}`, { method: 'DELETE' });
         toast('Conversation deleted for you.');
         el.deleteConvDialog.close();
+        closeChatInfoPanel();
 
         state.activeConversationId = null;
         if (el.convMoreWrap) el.convMoreWrap.hidden = true;
@@ -3584,11 +4137,25 @@
 
         const tdAction = document.createElement('td');
         if (u.id !== state.user.id) {
+          const actionWrap = document.createElement('div');
+          actionWrap.style.display = 'flex';
+          actionWrap.style.alignItems = 'center';
+          actionWrap.style.gap = '6px';
+
           const btn = document.createElement('button');
           btn.className = `btn-suspend ${u.isSuspended ? 'unsuspend' : ''}`;
           btn.textContent = u.isSuspended ? 'Unblock' : 'Block';
           btn.onclick = () => toggleSuspendUser(u.id, !u.isSuspended);
-          tdAction.appendChild(btn);
+          actionWrap.appendChild(btn);
+
+          const delBtn = document.createElement('button');
+          delBtn.className = 'btn-delete-user danger';
+          delBtn.textContent = 'Delete Account';
+          delBtn.title = 'Permanently delete this user account and all their chat history';
+          delBtn.onclick = () => deleteUserAccount(u.id, u.name);
+          actionWrap.appendChild(delBtn);
+
+          tdAction.appendChild(actionWrap);
         } else {
           tdAction.textContent = '(You)';
         }
@@ -3611,6 +4178,23 @@
       toast(`User ${suspend ? 'blocked' : 'unblocked'}`);
       loadAdminUsers();
       loadAdminStats();
+    } catch (err) {
+      toast(err.message);
+    }
+  }
+
+  async function deleteUserAccount(userId, userName) {
+    const confirmed = window.confirm(
+      `Are you sure you want to PERMANENTLY delete user "${userName}"?\n\nThis will delete all their messages, conversations, and uploaded media files without leaving any trace.`
+    );
+    if (!confirmed) return;
+
+    try {
+      await api(`/api/admin/users/${userId}`, { method: 'DELETE' });
+      toast(`User "${userName}" and all chat history permanently deleted.`);
+      loadAdminUsers();
+      loadAdminStats();
+      loadConversations();
     } catch (err) {
       toast(err.message);
     }
