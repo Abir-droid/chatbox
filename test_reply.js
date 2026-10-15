@@ -153,6 +153,37 @@ async function run() {
   assert.equal(replyMsgInHist.replyToText, 'Hello Alice!');
   console.log('  ✔ Message history successfully preserved and returned replyTo metadata');
 
+  // 5. Test multiple media upload endpoint
+  const boundary = '----WebKitFormBoundary' + Math.random().toString(36).substring(2);
+  const file1Content = 'fake image bytes 1';
+  const file2Content = 'fake video bytes 2';
+  let multiBody = '';
+  multiBody += `--${boundary}\r\n`;
+  multiBody += `Content-Disposition: form-data; name="media"; filename="photo1.png"\r\n`;
+  multiBody += `Content-Type: image/png\r\n\r\n`;
+  multiBody += file1Content + '\r\n';
+  multiBody += `--${boundary}\r\n`;
+  multiBody += `Content-Disposition: form-data; name="media"; filename="clip2.mp4"\r\n`;
+  multiBody += `Content-Type: video/mp4\r\n\r\n`;
+  multiBody += file2Content + '\r\n';
+  multiBody += `--${boundary}--\r\n`;
+
+  const uploadMultipleRes = await request('/api/upload-multiple', {
+    method: 'POST',
+    headers: {
+      'Content-Type': `multipart/form-data; boundary=${boundary}`,
+      Authorization: `Bearer ${tokenAlice}`,
+    },
+    body: multiBody,
+  });
+
+  assert.equal(uploadMultipleRes.status, 200);
+  assert.equal(uploadMultipleRes.json.ok, true);
+  assert.equal(uploadMultipleRes.json.files.length, 2);
+  assert.equal(uploadMultipleRes.json.files[0].mediaType, 'image');
+  assert.equal(uploadMultipleRes.json.files[1].mediaType, 'video');
+  console.log('  ✔ POST /api/upload-multiple successfully accepted and processed multiple media files in one go');
+
   clientAlice.disconnect();
   clientBob.disconnect();
   await new Promise((res) => server.close(res));

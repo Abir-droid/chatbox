@@ -286,25 +286,25 @@
           <span class="reply-bar-snippet" id="reply-bar-snippet">Original message text</span>
         </div>
         <button type="button" class="icon-btn reply-close" id="reply-cancel" title="Cancel reply" aria-label="Cancel reply">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
 
       <!-- File Preview Bar (when media selected) -->
       <div class="media-preview-bar" id="media-preview-bar" hidden>
-        <div class="media-thumb" id="media-thumb"></div>
+        <div class="media-previews-wrap" id="media-previews-wrap"></div>
         <div class="media-info">
           <span class="media-name" id="media-name">photo.jpg</span>
           <span class="media-size" id="media-size">1.2 MB</span>
         </div>
-        <button type="button" class="icon-btn media-close" id="media-cancel" title="Remove attachment">
-          <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        <button type="button" class="icon-btn media-close" id="media-cancel" title="Remove attachments" aria-label="Remove attachments">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
 
       <!-- Composer Bar -->
       <form class="composer" id="composer" autocomplete="off">
-        <input type="file" id="media-input" accept="image/*,video/*" hidden>
+        <input type="file" id="media-input" accept="image/*,video/*,audio/*" multiple hidden>
         
         <button type="button" class="icon-btn composer-btn" id="attach-btn" title="Attach photo or video" aria-label="Attach media">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
@@ -334,12 +334,15 @@
 
         <!-- Voice Recording Overlay Bar -->
         <div class="voice-record-bar" id="voice-record-bar" hidden>
-          <div class="voice-pulse-dot"></div>
+          <div class="voice-pulse-dot" id="voice-pulse-dot"></div>
           <span class="voice-record-timer" id="voice-record-timer">0:00</span>
-          <span class="voice-recording-label">Recording voice note…</span>
+          <span class="voice-recording-label" id="voice-recording-label">Recording voice note…</span>
           <div class="voice-actions">
+            <button type="button" class="icon-btn voice-pause-btn" id="voice-pause-btn" title="Pause recording" aria-label="Pause recording">
+              <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
+            </button>
             <button type="button" class="icon-btn voice-cancel-btn" id="voice-cancel-btn" title="Cancel voice recording" aria-label="Cancel recording">
-              <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
             <button type="button" class="voice-send-btn" id="voice-send-btn" title="Send voice note" aria-label="Send voice note">
               <svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
@@ -353,7 +356,7 @@
       <div class="selection-bar" id="selection-bar" hidden>
         <div class="selection-bar-left">
           <button type="button" class="icon-btn selection-close-btn" id="selection-close-btn" title="Cancel selection" aria-label="Cancel selection">
-            <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
           <span class="selection-count" id="selection-count">0 selected</span>
         </div>

@@ -1280,10 +1280,10 @@ button:active {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  margin-left: 9px;
-  margin-top: 5px;
+  margin-left: 8px;
+  margin-top: 6px;
   position: relative;
-  bottom: -2px;
+  bottom: -4px;
   font-size: 0.70rem;
   line-height: 1;
   color: var(--muted);
@@ -1368,10 +1368,10 @@ button:active {
 .bubble {
   position: relative;
   z-index: 1;
-  padding: 0.6rem 0.85rem;
-  border-radius: 18px 18px 18px 4px;
+  padding: 0.42rem 0.72rem;
+  border-radius: 16px 16px 16px 4px;
   font-size: 0.93rem;
-  line-height: 1.45;
+  line-height: 1.42;
   word-break: break-word;
   background: var(--bubble-other);
   color: var(--bubble-other-ink);
@@ -2072,10 +2072,29 @@ button:active {
 
 .reply-close {
   color: var(--muted);
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: all 0.15s ease;
 }
 
 .reply-close:hover {
   color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.reply-close svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+  display: block;
 }
 
 /* Media Preview Bar */
@@ -2089,6 +2108,69 @@ button:active {
   animation: fadeIn 0.2s ease;
 }
 
+.media-previews-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  max-width: 65%;
+  overflow-x: auto;
+  padding: 3px 2px;
+}
+
+.media-preview-chip {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  border-radius: 8px;
+  background-size: cover;
+  background-position: center;
+  background-color: var(--surface-3);
+  border: 1.5px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 1.25rem;
+}
+
+.media-chip-remove {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  z-index: 2;
+}
+
+.media-chip-remove:hover {
+  background: var(--danger);
+  color: #ffffff;
+  border-color: var(--danger);
+  transform: scale(1.1);
+}
+
+.media-chip-remove svg {
+  width: 10px;
+  height: 10px;
+  stroke: currentColor;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+  display: block;
+}
+
 .media-thumb {
   width: 44px;
   height: 44px;
@@ -2100,18 +2182,23 @@ button:active {
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
 }
 
 .media-info {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 .media-name {
   font-size: 0.88rem;
   font-weight: 600;
   color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .media-size {
@@ -2121,18 +2208,29 @@ button:active {
 
 .media-close {
   color: var(--muted);
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: all 0.15s ease;
 }
 
 .media-close:hover {
   color: var(--danger);
+  background: var(--danger-soft);
 }
 
 .media-close svg {
   width: 18px;
   height: 18px;
   stroke: currentColor;
-  stroke-width: 2;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
   fill: none;
+  display: block;
 }
 
 /* Composer Bar */
@@ -2995,16 +3093,20 @@ dialog.lightbox-dialog::backdrop {
 
 .msg-audio audio {
   width: 100%;
-  height: 36px;
+  height: 38px;
   border-radius: 18px;
   outline: none;
   border: none !important;
-  background: rgba(0, 0, 0, 0.04);
+  color-scheme: light dark;
+}
+
+[data-theme="dark"] .msg-audio audio {
+  color-scheme: dark;
 }
 
 .msg-row.own .msg-audio audio {
-  background: rgba(255, 255, 255, 0.14);
-  filter: contrast(105%);
+  background: rgba(255, 255, 255, 0.18);
+  color-scheme: dark;
 }
 
 /* Friends Sub-Tabs (My Friends / Friend Requests) */
@@ -3170,17 +3272,62 @@ dialog.lightbox-dialog::backdrop {
   gap: 0.5rem;
 }
 
+.voice-pause-btn {
+  color: var(--muted);
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.voice-pause-btn:hover {
+  color: var(--accent);
+  background: var(--surface-3);
+}
+
+.voice-pause-btn svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+  stroke: none;
+  display: block;
+}
+
 .voice-cancel-btn {
   color: var(--muted);
   width: 34px;
   height: 34px;
   border-radius: 50%;
   background: var(--surface-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
 }
 
 .voice-cancel-btn:hover {
   color: var(--danger);
   background: var(--danger-soft);
+}
+
+.voice-cancel-btn svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+  display: block;
+}
+
+.voice-pulse-dot.paused {
+  animation-play-state: paused !important;
+  opacity: 0.45;
 }
 
 .voice-send-btn {
@@ -3510,9 +3657,9 @@ dialog.lightbox-dialog::backdrop {
   }
 
   .bubble {
-    padding: 0.65rem 0.85rem;
+    padding: 0.42rem 0.68rem;
     font-size: 0.92rem;
-    line-height: 1.4;
+    line-height: 1.38;
     border-radius: 16px 16px 16px 4px;
   }
 

@@ -83,10 +83,14 @@
     voiceBtn: $('voice-btn'),
     voiceRecordBar: $('voice-record-bar'),
     voiceRecordTimer: $('voice-record-timer'),
+    voicePauseBtn: $('voice-pause-btn'),
+    voicePulseDot: $('voice-pulse-dot'),
+    voiceRecordingLabel: $('voice-recording-label'),
     voiceCancelBtn: $('voice-cancel-btn'),
     voiceSendBtn: $('voice-send-btn'),
     mediaInput: $('media-input'),
     mediaPreviewBar: $('media-preview-bar'),
+    mediaPreviewsWrap: $('media-previews-wrap'),
     mediaThumb: $('media-thumb'),
     mediaName: $('media-name'),
     mediaSize: $('media-size'),
@@ -192,6 +196,7 @@
     friendRequests: [],
     activeConversationId: null,
     selectedFile: null,
+    selectedFiles: [],
     replyTarget: null,
     typers: new Map(),
     notificationsEnabled: typeof Notification !== 'undefined' && Notification.permission === 'granted',
@@ -766,18 +771,23 @@
 
       const isCurrent = state.activeConversationId === msg.conversationId;
       if (isCurrent) {
-        // If the previous message was from the same sender within 1 minute, swap its avatar to an avatar-spacer
-        const lastRow = el.messages.lastElementChild;
-        if (lastRow && !lastRow.classList.contains('system') && !lastRow.classList.contains('own')) {
-          const lastMsgId = Number(lastRow.id.replace('msg-', ''));
-          const lastMsg = state.messagesCache.get(lastMsgId);
-          if (lastMsg && lastMsg.senderId === msg.senderId && Math.abs(msg.ts - lastMsg.ts) < 60000) {
-            const oldAvatar = lastRow.querySelector('.chat-bubble-avatar');
-            if (oldAvatar) {
-              const spacer = document.createElement('span');
-              spacer.className = 'avatar-spacer';
-              spacer.setAttribute('aria-hidden', 'true');
-              oldAvatar.replaceWith(spacer);
+        const currentConv = state.conversations.find((c) => c.id === msg.conversationId);
+        const isGroup = currentConv && currentConv.type === 'group';
+
+        // In group chats, if previous message was from same sender within 1 minute, swap its avatar to an avatar-spacer
+        if (isGroup) {
+          const lastRow = el.messages.lastElementChild;
+          if (lastRow && !lastRow.classList.contains('system') && !lastRow.classList.contains('own')) {
+            const lastMsgId = Number(lastRow.id.replace('msg-', ''));
+            const lastMsg = state.messagesCache.get(lastMsgId);
+            if (lastMsg && lastMsg.senderId === msg.senderId && Math.abs(msg.ts - lastMsg.ts) < 60000) {
+              const oldAvatar = lastRow.querySelector('.chat-bubble-avatar');
+              if (oldAvatar) {
+                const spacer = document.createElement('span');
+                spacer.className = 'avatar-spacer';
+                spacer.setAttribute('aria-hidden', 'true');
+                oldAvatar.replaceWith(spacer);
+              }
             }
           }
         }
@@ -1185,13 +1195,15 @@
       }
     });
 
-    // Avatar for other user (Meta Messenger style: only beside lowest chat bubble in cluster)
-    if (!isOwn) {
+    const activeConv = state.conversations.find((c) => c.id === (msg.conversationId || state.activeConversationId));
+    const isGroup = activeConv && activeConv.type === 'group';
+
+    // Avatar for other user: ONLY in group chats (Meta Messenger style clustering in groups)
+    if (!isOwn && isGroup) {
       if (isLastInCluster) {
         const avatar = document.createElement('span');
         avatar.className = 'avatar chat-bubble-avatar';
-        const conv = state.conversations.find((c) => c.id === (msg.conversationId || state.activeConversationId));
-        renderAvatar(avatar, msg.senderName, conv ? conv.avatarColor : 0, conv ? conv.avatarUrl : null);
+        renderAvatar(avatar, msg.senderName, activeConv ? activeConv.avatarColor : 0, activeConv ? activeConv.avatarUrl : null);
         li.appendChild(avatar);
       } else {
         const spacer = document.createElement('span');
@@ -1216,8 +1228,7 @@
     bubble.id = `msg-bubble-${msg.id}`;
 
     // Sender name inside bubble for incoming messages in group chats
-    const currentConv = state.conversations.find((c) => c.id === (msg.conversationId || state.activeConversationId));
-    if (currentConv && currentConv.type === 'group' && !isOwn) {
+    if (isGroup && !isOwn) {
       const authorDiv = document.createElement('div');
       authorDiv.className = 'bubble-author';
       authorDiv.textContent = msg.senderName;
@@ -1619,59 +1630,116 @@
   }
 
   /* ------------------------------------------------------------- media upload & drag-drop */
-  function handleMediaFile(file) {
-    if (!file) return;
-    state.selectedFile = file;
-    el.mediaName.textContent = file.name || (file.type.startsWith('image/') ? 'Pasted Image' : 'Media file');
-    el.mediaSize.textContent = `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
+  function handleMediaFiles(files) {
+    if (!files || !files.length) return;
+    if (!state.selectedFiles) state.selectedFiles = [];
 
-    if (file.type.startsWith('image/')) {
-      const url = URL.createObjectURL(file);
-      el.mediaThumb.style.backgroundImage = `url(${url})`;
-      el.mediaThumb.textContent = '';
+    const fileList = Array.isArray(files) ? files : Array.from(files);
+    for (const f of fileList) {
+      if (!f) continue;
+      const exists = state.selectedFiles.some((item) => item.name === f.name && item.size === f.size);
+      if (!exists) {
+        state.selectedFiles.push(f);
+      }
+    }
+    state.selectedFile = state.selectedFiles[0] || null;
+    renderMediaPreview();
+    el.input.focus();
+  }
+
+  function handleMediaFile(file) {
+    if (file) handleMediaFiles([file]);
+  }
+
+  function renderMediaPreview() {
+    if (!state.selectedFiles || !state.selectedFiles.length) {
+      clearMediaSelection();
+      return;
+    }
+
+    if (el.mediaPreviewsWrap) {
+      el.mediaPreviewsWrap.replaceChildren();
+      state.selectedFiles.forEach((file, idx) => {
+        const chip = document.createElement('div');
+        chip.className = 'media-preview-chip';
+        chip.title = file.name;
+
+        if (file.type && file.type.startsWith('image/')) {
+          const url = URL.createObjectURL(file);
+          chip.style.backgroundImage = `url(${url})`;
+        } else {
+          chip.textContent = file.type && file.type.startsWith('video/') ? '🎥' : (file.type && file.type.startsWith('audio/') ? '🎵' : '📁');
+        }
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'media-chip-remove';
+        removeBtn.title = 'Remove file';
+        removeBtn.setAttribute('aria-label', 'Remove file');
+        removeBtn.innerHTML = '<svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+        removeBtn.onclick = (e) => {
+          e.stopPropagation();
+          state.selectedFiles.splice(idx, 1);
+          state.selectedFile = state.selectedFiles[0] || null;
+          renderMediaPreview();
+        };
+
+        chip.appendChild(removeBtn);
+        el.mediaPreviewsWrap.appendChild(chip);
+      });
+    }
+
+    const totalBytes = state.selectedFiles.reduce((acc, f) => acc + f.size, 0);
+    const totalMb = (totalBytes / (1024 * 1024)).toFixed(1);
+
+    if (state.selectedFiles.length === 1) {
+      const single = state.selectedFiles[0];
+      el.mediaName.textContent = single.name || (single.type && single.type.startsWith('image/') ? 'Pasted Image' : 'Media file');
+      el.mediaSize.textContent = `${(single.size / (1024 * 1024)).toFixed(1)} MB`;
     } else {
-      el.mediaThumb.style.backgroundImage = 'none';
-      el.mediaThumb.textContent = file.type.startsWith('video/') ? '🎥' : (file.type.startsWith('audio/') ? '🎵' : '📁');
+      el.mediaName.textContent = `${state.selectedFiles.length} files selected`;
+      el.mediaSize.textContent = `${totalMb} MB total`;
     }
 
     el.mediaPreviewBar.hidden = false;
-    el.input.focus();
   }
 
   el.attachBtn.onclick = () => el.mediaInput.click();
 
   el.mediaInput.onchange = () => {
-    const file = el.mediaInput.files && el.mediaInput.files[0];
-    if (file) handleMediaFile(file);
+    const files = el.mediaInput.files && Array.from(el.mediaInput.files);
+    if (files && files.length) handleMediaFiles(files);
   };
 
   el.mediaCancel.onclick = clearMediaSelection;
 
   function clearMediaSelection() {
+    state.selectedFiles = [];
     state.selectedFile = null;
-    el.mediaInput.value = '';
-    el.mediaPreviewBar.hidden = true;
+    if (el.mediaInput) el.mediaInput.value = '';
+    if (el.mediaPreviewsWrap) el.mediaPreviewsWrap.replaceChildren();
+    if (el.mediaPreviewBar) el.mediaPreviewBar.hidden = true;
   }
 
-  // Clipboard Paste Support (Requirement 7)
+  // Clipboard Paste Support (multiple files or text)
   el.input.addEventListener('paste', (e) => {
     const items = (e.clipboardData || window.clipboardData)?.items;
     if (!items) return;
+    const pastedFiles = [];
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
-      if (item.kind === 'file' || item.type.startsWith('image/') || item.type.startsWith('video/') || item.type.startsWith('audio/')) {
+      if (item.kind === 'file' || (item.type && (item.type.startsWith('image/') || item.type.startsWith('video/') || item.type.startsWith('audio/')))) {
         const file = item.getAsFile();
-        if (file) {
-          e.preventDefault();
-          handleMediaFile(file);
-          return;
-        }
+        if (file) pastedFiles.push(file);
       }
     }
-    // Text paste continues normally as default
+    if (pastedFiles.length > 0) {
+      e.preventDefault();
+      handleMediaFiles(pastedFiles);
+    }
   });
 
-  // Desktop Drag & Drop Support (Requirement 6)
+  // Desktop Drag & Drop Support (multiple files)
   let dragCounter = 0;
   window.addEventListener('dragenter', (e) => {
     if (!e.dataTransfer || !e.dataTransfer.types) return;
@@ -1708,8 +1776,8 @@
       toast('Open a conversation to send media');
       return;
     }
-    const file = e.dataTransfer.files[0];
-    handleMediaFile(file);
+    const files = Array.from(e.dataTransfer.files);
+    handleMediaFiles(files);
   });
 
   /* ------------------------------------------------------------- message selection & forward */
@@ -1976,21 +2044,24 @@
     if (!state.activeConversationId) return;
 
     const text = el.input.value.trim();
-    if (!text && !state.selectedFile) return;
+    const filesToSend = (state.selectedFiles && state.selectedFiles.length > 0)
+      ? state.selectedFiles
+      : (state.selectedFile ? [state.selectedFile] : []);
 
-    let mediaUrl = null;
-    let mediaType = null;
-    let mediaName = null;
+    if (!text && !filesToSend.length) return;
 
     el.send.disabled = true;
 
     try {
-      if (state.selectedFile) {
-        toast('Uploading media…');
+      if (filesToSend.length > 0) {
+        toast(`Uploading ${filesToSend.length} media file${filesToSend.length > 1 ? 's' : ''}…`);
         const fd = new FormData();
-        fd.append('media', state.selectedFile);
+        for (const file of filesToSend) {
+          fd.append('media', file);
+        }
 
-        const uploadRes = await fetch(`${BASE}/api/upload`, {
+        const endpoint = filesToSend.length > 1 ? `${BASE}/api/upload-multiple` : `${BASE}/api/upload`;
+        const uploadRes = await fetch(endpoint, {
           method: 'POST',
           headers: { Authorization: `Bearer ${state.token}` },
           body: fd,
@@ -1999,30 +2070,51 @@
         const data = await uploadRes.json();
         if (!uploadRes.ok) throw new Error(data.error || 'Media upload failed');
 
-        mediaUrl = data.url;
-        mediaType = data.mediaType;
-        mediaName = data.mediaName;
-      }
+        const uploadedList = data.files || [{ url: data.url, mediaType: data.mediaType, mediaName: data.mediaName }];
 
-      const payload = {
-        conversationId: state.activeConversationId,
-        text,
-        mediaUrl,
-        mediaType,
-        mediaName,
-      };
+        for (let i = 0; i < uploadedList.length; i++) {
+          const item = uploadedList[i];
+          const payload = {
+            conversationId: state.activeConversationId,
+            text: i === 0 ? text : '',
+            mediaUrl: item.url,
+            mediaType: item.mediaType,
+            mediaName: item.mediaName,
+          };
 
-      if (state.replyTarget) {
-        payload.replyToId = state.replyTarget.id;
-        payload.replyToSender = state.replyTarget.senderName;
-        payload.replyToText = state.replyTarget.text;
-      }
+          if (i === 0 && state.replyTarget) {
+            payload.replyToId = state.replyTarget.id;
+            payload.replyToSender = state.replyTarget.senderName;
+            payload.replyToText = state.replyTarget.text;
+          }
 
-      socket.emit('message', payload, (ack) => {
-        if (ack && !ack.ok) {
-          toast(ack.error || 'Failed to send message');
+          socket.emit('message', payload, (ack) => {
+            if (ack && !ack.ok) {
+              toast(ack.error || 'Failed to send message');
+            }
+          });
         }
-      });
+      } else {
+        const payload = {
+          conversationId: state.activeConversationId,
+          text,
+          mediaUrl: null,
+          mediaType: null,
+          mediaName: null,
+        };
+
+        if (state.replyTarget) {
+          payload.replyToId = state.replyTarget.id;
+          payload.replyToSender = state.replyTarget.senderName;
+          payload.replyToText = state.replyTarget.text;
+        }
+
+        socket.emit('message', payload, (ack) => {
+          if (ack && !ack.ok) {
+            toast(ack.error || 'Failed to send message');
+          }
+        });
+      }
 
       playSendSound();
       el.input.value = '';
@@ -2090,6 +2182,58 @@
   let voiceChunks = [];
   let voiceTimerInterval = null;
   let voiceSeconds = 0;
+  let isVoicePaused = false;
+
+  function resetVoiceUi() {
+    isVoicePaused = false;
+    if (el.voicePulseDot) el.voicePulseDot.classList.remove('paused');
+    if (el.voiceRecordingLabel) el.voiceRecordingLabel.textContent = 'Recording voice note…';
+    if (el.voicePauseBtn) {
+      el.voicePauseBtn.title = 'Pause recording';
+      el.voicePauseBtn.setAttribute('aria-label', 'Pause recording');
+      el.voicePauseBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>';
+    }
+  }
+
+  function toggleVoicePause() {
+    if (!mediaRecorder) return;
+    if (mediaRecorder.state === 'recording') {
+      try {
+        mediaRecorder.pause();
+      } catch (err) {
+        console.warn('pause failed', err);
+      }
+      isVoicePaused = true;
+      clearInterval(voiceTimerInterval);
+      if (el.voicePulseDot) el.voicePulseDot.classList.add('paused');
+      if (el.voiceRecordingLabel) el.voiceRecordingLabel.textContent = 'Recording paused';
+      if (el.voicePauseBtn) {
+        el.voicePauseBtn.title = 'Resume recording';
+        el.voicePauseBtn.setAttribute('aria-label', 'Resume recording');
+        el.voicePauseBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg>';
+      }
+    } else if (mediaRecorder.state === 'paused') {
+      try {
+        mediaRecorder.resume();
+      } catch (err) {
+        console.warn('resume failed', err);
+      }
+      isVoicePaused = false;
+      if (el.voicePulseDot) el.voicePulseDot.classList.remove('paused');
+      if (el.voiceRecordingLabel) el.voiceRecordingLabel.textContent = 'Recording voice note…';
+      if (el.voicePauseBtn) {
+        el.voicePauseBtn.title = 'Pause recording';
+        el.voicePauseBtn.setAttribute('aria-label', 'Pause recording');
+        el.voicePauseBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>';
+      }
+      voiceTimerInterval = setInterval(() => {
+        voiceSeconds++;
+        const mins = Math.floor(voiceSeconds / 60);
+        const secs = voiceSeconds % 60;
+        el.voiceRecordTimer.textContent = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+      }, 1000);
+    }
+  }
 
   async function startVoiceRecording() {
     if (!state.activeConversationId) {
@@ -2106,6 +2250,7 @@
       voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       voiceChunks = [];
       voiceSeconds = 0;
+      resetVoiceUi();
       el.voiceRecordTimer.textContent = '0:00';
       el.voiceRecordBar.hidden = false;
       playRecordStartSound();
@@ -2137,6 +2282,7 @@
     } catch (err) {
       toast('Microphone access denied or audio recording failed.');
       el.voiceRecordBar.hidden = true;
+      resetVoiceUi();
       if (voiceStream) {
         voiceStream.getTracks().forEach((t) => t.stop());
         voiceStream = null;
@@ -2152,6 +2298,7 @@
     el.voiceRecordBar.hidden = true;
     mediaRecorder = null;
     voiceStream = null;
+    resetVoiceUi();
 
     if (discard) {
       playRecordStopSound();
@@ -2234,6 +2381,10 @@
         stopVoiceRecording(false);
       }
     };
+  }
+
+  if (el.voicePauseBtn) {
+    el.voicePauseBtn.onclick = toggleVoicePause;
   }
 
   if (el.voiceCancelBtn) {

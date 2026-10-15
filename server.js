@@ -1313,14 +1313,9 @@ app.get('/api/conversations/:id/messages', authMiddleware, async (req, res) => {
   }
 });
 
-// Media: Upload Photo / Video / Audio (Voice Message)
-app.post('/api/upload', authMiddleware, upload.single('media'), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ ok: false, error: 'No media file provided.' });
-  }
-
-  const mime = (req.file.mimetype || '').toLowerCase();
-  const orig = (req.file.originalname || '').toLowerCase();
+function inspectFileMediaType(file) {
+  const mime = (file.mimetype || '').toLowerCase();
+  const orig = (file.originalname || '').toLowerCase();
   const isAudio =
     orig.startsWith('voice-') ||
     mime.startsWith('audio/') ||
@@ -1335,7 +1330,16 @@ app.post('/api/upload', authMiddleware, upload.single('media'), (req, res) => {
     mime.includes('ogg') ||
     mime.includes('wav');
   const isVideo = !isAudio && (mime.startsWith('video/') || orig.endsWith('.mp4') || orig.endsWith('.mov'));
-  const mediaType = isAudio ? 'audio' : (isVideo ? 'video' : 'image');
+  return isAudio ? 'audio' : (isVideo ? 'video' : 'image');
+}
+
+// Media: Upload Photo / Video / Audio (Voice Message)
+app.post('/api/upload', authMiddleware, upload.single('media'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ ok: false, error: 'No media file provided.' });
+  }
+
+  const mediaType = inspectFileMediaType(req.file);
   const url = `${PREFIX}/static/uploads/${req.file.filename}`;
 
   res.json({
@@ -1345,6 +1349,24 @@ app.post('/api/upload', authMiddleware, upload.single('media'), (req, res) => {
     mediaName: req.file.originalname,
     size: req.file.size,
   });
+});
+
+// Media: Upload Multiple Photos / Videos / Audio in one go
+app.post('/api/upload-multiple', authMiddleware, upload.array('media', 20), (req, res) => {
+  const files = req.files || [];
+  if (!files.length && req.file) files.push(req.file);
+  if (!files.length) {
+    return res.status(400).json({ ok: false, error: 'No media files provided.' });
+  }
+
+  const results = files.map((f) => ({
+    url: `${PREFIX}/static/uploads/${f.filename}`,
+    mediaType: inspectFileMediaType(f),
+    mediaName: f.originalname,
+    size: f.size,
+  }));
+
+  res.json({ ok: true, files: results });
 });
 
 // Messages: Soft Delete
