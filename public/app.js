@@ -62,8 +62,6 @@
     convTitle: $('conv-title'),
     convSub: $('conv-sub'),
     manageGroupBtn: $('manage-group-btn'),
-    convMoreWrap: $('conv-more-wrap'),
-    convMoreBtn: $('conv-more-btn'),
     convDropdown: $('conv-dropdown'),
     deleteConvBtn: $('delete-conv-btn'),
 
@@ -1245,7 +1243,6 @@
       el.manageGroupBtn.hidden = true;
     }
     closeChatInfoPanel();
-    if (el.convMoreWrap) el.convMoreWrap.hidden = false;
     if (el.convDropdown) el.convDropdown.hidden = true;
     if (el.deleteConvBtn) el.deleteConvBtn.hidden = false;
 
@@ -3759,19 +3756,20 @@
     }
   }
 
-  // Open sidepanel from header options button or header details
-  if (el.convMoreBtn) {
-    el.convMoreBtn.onclick = (e) => {
-      e.stopPropagation();
+  function toggleChatInfoPanel() {
+    if (!state.activeConversationId) return;
+    if (el.chatInfoPanel && el.chatInfoPanel.classList.contains('open')) {
+      closeChatInfoPanel();
+    } else {
       openChatInfoPanel();
-    };
+    }
   }
 
+  // Toggle sidepanel when clicking conversation details (avatar/name) in header
   const headerDetails = document.querySelector('.conv-details');
   if (headerDetails) {
-    headerDetails.style.cursor = 'pointer';
     headerDetails.onclick = () => {
-      if (state.activeConversationId) openChatInfoPanel();
+      toggleChatInfoPanel();
     };
   }
 
@@ -3888,7 +3886,6 @@
         closeChatInfoPanel();
 
         state.activeConversationId = null;
-        if (el.convMoreWrap) el.convMoreWrap.hidden = true;
         if (el.convDropdown) el.convDropdown.hidden = true;
         el.manageGroupBtn.hidden = true;
         el.convTitle.textContent = 'Select a conversation';
@@ -4288,7 +4285,7 @@
   });
 
   document.addEventListener('click', (e) => {
-    if (!e.target.closest('.msg-menu-wrap') && !e.target.closest('.chat-item-menu-wrap') && !e.target.closest('.conv-more-wrap')) {
+    if (!e.target.closest('.msg-menu-wrap') && !e.target.closest('.chat-item-menu-wrap')) {
       closeAllDropdowns();
     }
   });

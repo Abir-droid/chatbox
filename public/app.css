@@ -1094,6 +1094,16 @@ button:active {
   display: flex;
   align-items: center;
   gap: 0.85rem;
+  cursor: pointer;
+  user-select: none;
+  border-radius: 10px;
+  padding: 4px 8px;
+  margin: -4px -8px;
+  transition: background 0.15s ease;
+}
+
+.conv-details:hover {
+  background: var(--surface-2);
 }
 
 .conv-avatar-wrap {
@@ -1901,29 +1911,7 @@ button:active {
   color: var(--danger-hover);
 }
 
-/* Conversation Header Actions Dropdown */
-.conv-more-wrap {
-  position: relative;
-}
 
-.conv-more-btn {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  color: var(--ink-secondary);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.conv-more-btn:hover {
-  background: var(--surface-3);
-  color: var(--ink);
-}
 
 .conv-dropdown {
   position: absolute;
