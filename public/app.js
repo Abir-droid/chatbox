@@ -92,6 +92,11 @@
     mediaSize: $('media-size'),
     mediaCancel: $('media-cancel'),
 
+    replyPreviewBar: $('reply-preview-bar'),
+    replyBarTitle: $('reply-bar-title'),
+    replyBarSnippet: $('reply-bar-snippet'),
+    replyCancel: $('reply-cancel'),
+
     emojiBtn: $('emoji-btn'),
     emojiPicker: $('emoji-picker'),
 
@@ -161,6 +166,7 @@
     friendRequests: [],
     activeConversationId: null,
     selectedFile: null,
+    replyTarget: null,
     typers: new Map(),
     notificationsEnabled: Notification && Notification.permission === 'granted',
   };
@@ -933,6 +939,8 @@
     updateMenuButton();
     state.typers.clear();
     renderTyping();
+    cancelReply();
+    clearMediaSelection();
 
     const conv = state.conversations.find((c) => c.id === convId);
     if (!conv) return;
@@ -1041,6 +1049,34 @@
     bubble.className = 'bubble';
     bubble.id = `msg-bubble-${msg.id}`;
 
+    // Quoted reply block (if message is replying to another message)
+    const replyTargetId = msg.replyToId || msg.reply_to_id;
+    if (replyTargetId) {
+      const quoteDiv = document.createElement('div');
+      quoteDiv.className = 'msg-reply-quote';
+      quoteDiv.title = 'Click to jump to replied message';
+      const replyAuthor = msg.replyToSender || msg.reply_to_sender || 'User';
+      const replySnippet = msg.replyToText || msg.reply_to_text || 'Original message';
+      quoteDiv.innerHTML = `
+        <div class="msg-reply-body">
+          <span class="msg-reply-author">${escapeHtml(replyAuthor)}</span>
+          <span class="msg-reply-snippet">${escapeHtml(replySnippet)}</span>
+        </div>
+      `;
+      quoteDiv.onclick = (e) => {
+        e.stopPropagation();
+        const targetRow = document.getElementById(`msg-${replyTargetId}`);
+        if (targetRow) {
+          targetRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          targetRow.classList.add('highlight-flash');
+          setTimeout(() => targetRow.classList.remove('highlight-flash'), 1600);
+        } else {
+          toast('Replied message is further up in history');
+        }
+      };
+      bubble.appendChild(quoteDiv);
+    }
+
     let textP = null;
     if (msg.text) {
       textP = document.createElement('p');
@@ -1138,6 +1174,16 @@
         dropdown.hidden = false;
         downBtn.classList.add('active');
         li.classList.add('show-menu');
+
+        // Check if menu would overflow below the visible log area
+        dropdown.classList.remove('open-up');
+        if (el.log) {
+          const dRect = dropdown.getBoundingClientRect();
+          const lRect = el.log.getBoundingClientRect();
+          if (dRect.bottom > lRect.bottom && dRect.top - dRect.height > lRect.top) {
+            dropdown.classList.add('open-up');
+          }
+        }
       }
     }
 
@@ -1177,7 +1223,19 @@
       if (touchTimer) clearTimeout(touchTimer);
     });
 
-    // Option 1: Copy Text
+    // Option 1: Reply to message
+    const replyItem = document.createElement('button');
+    replyItem.type = 'button';
+    replyItem.className = 'msg-dropdown-item';
+    replyItem.innerHTML = '<svg viewBox="0 0 24 24"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg><span>Reply</span>';
+    replyItem.onclick = (e) => {
+      e.stopPropagation();
+      closeAllDropdowns();
+      startReply(msg);
+    };
+    dropdown.appendChild(replyItem);
+
+    // Option 2: Copy Text
     if (msg.text) {
       const copyItem = document.createElement('button');
       copyItem.type = 'button';
@@ -1195,7 +1253,7 @@
       };
       dropdown.appendChild(copyItem);
 
-      // Option 2: Select Text
+      // Option 3: Select Text
       const selectItem = document.createElement('button');
       selectItem.type = 'button';
       selectItem.className = 'msg-dropdown-item';
@@ -1215,27 +1273,50 @@
       dropdown.appendChild(selectItem);
     }
 
-    // Option 3: Copy Media Link (if media present)
+    // Option 4: Download Media (if media present)
     if (mediaUrl) {
-      const copyMediaItem = document.createElement('button');
-      copyMediaItem.type = 'button';
-      copyMediaItem.className = 'msg-dropdown-item';
-      copyMediaItem.innerHTML = '<svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg><span>Copy media link</span>';
-      copyMediaItem.onclick = async (e) => {
+      const downloadItem = document.createElement('button');
+      downloadItem.type = 'button';
+      downloadItem.className = 'msg-dropdown-item';
+      downloadItem.innerHTML = '<svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>Download media</span>';
+      downloadItem.onclick = async (e) => {
         e.stopPropagation();
         closeAllDropdowns();
         try {
-          const fullUrl = new URL(mediaUrl, window.location.origin).href;
-          await navigator.clipboard.writeText(fullUrl);
-          toast('Media link copied');
-        } catch {
-          toast('Failed to copy');
+          toast('Downloading media…');
+          const response = await fetch(mediaUrl);
+          if (!response.ok) throw new Error('Download failed');
+          const blob = await response.blob();
+          const blobUrl = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.style.display = 'none';
+          a.href = blobUrl;
+          let filename = msg.mediaName || '';
+          if (!filename || filename === 'Photo' || filename === 'Video' || filename === 'Voice note') {
+            const ext = mediaUrl.split('.').pop().split('?')[0] || 'bin';
+            filename = `chatbox-${Date.now()}.${ext}`;
+          }
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(() => {
+            document.body.removeChild(a);
+            URL.revokeObjectURL(blobUrl);
+          }, 1000);
+        } catch (err) {
+          const a = document.createElement('a');
+          a.href = mediaUrl;
+          a.download = msg.mediaName || 'download';
+          a.target = '_blank';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
         }
       };
-      dropdown.appendChild(copyMediaItem);
+      dropdown.appendChild(downloadItem);
     }
 
-    // Option 4: Delete Message (if owner or admin)
+    // Option 5: Delete Message (if owner or admin)
     if (isOwn || (state.user && state.user.is_admin)) {
       const delItem = document.createElement('button');
       delItem.type = 'button';
@@ -1317,6 +1398,42 @@
     el.mediaPreviewBar.hidden = true;
   }
 
+  /* ------------------------------------------------------------- reply feature */
+  function startReply(msg) {
+    let snippet = msg.text || '';
+    if (!snippet) {
+      const type = (msg.mediaType || msg.media_type || '').toLowerCase();
+      if (type === 'audio') snippet = 'Voice note';
+      else if (type === 'image') snippet = 'Photo';
+      else if (type === 'video') snippet = 'Video';
+      else snippet = 'Attachment';
+    }
+    const senderName = msg.senderName || (msg.senderId === state.user?.id ? 'You' : 'User');
+    state.replyTarget = {
+      id: msg.id,
+      senderName,
+      text: snippet.length > 80 ? snippet.slice(0, 80) + '…' : snippet,
+    };
+
+    if (el.replyPreviewBar) {
+      if (el.replyBarTitle) el.replyBarTitle.textContent = `Replying to ${state.replyTarget.senderName}`;
+      if (el.replyBarSnippet) el.replyBarSnippet.textContent = state.replyTarget.text;
+      el.replyPreviewBar.hidden = false;
+    }
+    el.input.focus();
+  }
+
+  function cancelReply() {
+    state.replyTarget = null;
+    if (el.replyPreviewBar) {
+      el.replyPreviewBar.hidden = true;
+    }
+  }
+
+  if (el.replyCancel) {
+    el.replyCancel.onclick = cancelReply;
+  }
+
   function openLightbox(url) {
     el.lightboxImg.src = url;
     el.lightboxDialog.showModal();
@@ -1358,13 +1475,21 @@
         mediaName = data.mediaName;
       }
 
-      socket.emit('message', {
+      const payload = {
         conversationId: state.activeConversationId,
         text,
         mediaUrl,
         mediaType,
         mediaName,
-      }, (ack) => {
+      };
+
+      if (state.replyTarget) {
+        payload.replyToId = state.replyTarget.id;
+        payload.replyToSender = state.replyTarget.senderName;
+        payload.replyToText = state.replyTarget.text;
+      }
+
+      socket.emit('message', payload, (ack) => {
         if (ack && !ack.ok) {
           toast(ack.error || 'Failed to send message');
         }
@@ -1373,6 +1498,7 @@
       playSendSound();
       el.input.value = '';
       clearMediaSelection();
+      cancelReply();
     } catch (err) {
       toast(err.message);
     } finally {
@@ -2479,7 +2605,7 @@
 
   function updateMenuButton() {
     if (!el.menuBtn) return;
-    el.menuBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>';
+    el.menuBtn.innerHTML = '<svg class="brand-mark menu-brand-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>';
     el.menuBtn.setAttribute('title', 'Toggle navigation');
     el.menuBtn.setAttribute('aria-label', 'Toggle navigation');
   }
@@ -2495,6 +2621,13 @@
 
   window.addEventListener('resize', () => {
     updateMenuButton();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closeAllDropdowns();
+      if (state.replyTarget) cancelReply();
+    }
   });
 
   document.addEventListener('click', (e) => {

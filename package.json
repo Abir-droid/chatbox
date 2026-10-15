@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env server.js",
     "dev": "node --watch --env-file-if-exists=.env server.js",
-    "test": "node test.js && node test_new_features.js"
+    "test": "node test.js && node test_new_features.js && node test_reply.js"
   },
   "dependencies": {
     "express": "^5.3.0",

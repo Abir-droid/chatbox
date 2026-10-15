@@ -127,6 +127,9 @@ async function initDatabase() {
           media_url       TEXT,
           media_type      TEXT,
           media_name      TEXT,
+          reply_to_id     BIGINT,
+          reply_to_sender TEXT,
+          reply_to_text   TEXT,
           is_deleted      BOOLEAN NOT NULL DEFAULT FALSE,
           created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
         );
@@ -138,6 +141,9 @@ async function initDatabase() {
         ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_url TEXT;
         ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_type TEXT;
         ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_name TEXT;
+        ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS reply_to_id BIGINT;
+        ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS reply_to_sender TEXT;
+        ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS reply_to_text TEXT;
         ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE;
 
         -- Migrations for profile pic, conversation clear, and friend requests
@@ -382,7 +388,6 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
   fileFilter: (req, file, cb) => {
     const mime = (file.mimetype || '').toLowerCase();
     const orig = (file.originalname || '').toLowerCase();
@@ -1250,7 +1255,8 @@ app.get('/api/conversations/:id/messages', authMiddleware, async (req, res) => {
     let rows;
     if (clearedAt) {
       const q = await pool.query(
-        `SELECT id, conversation_id, sender_id, sender_name, body, media_url, media_type, media_name, created_at
+        `SELECT id, conversation_id, sender_id, sender_name, body, media_url, media_type, media_name,
+                reply_to_id, reply_to_sender, reply_to_text, created_at
          FROM chat_messages
          WHERE conversation_id = $1 AND is_deleted = FALSE AND created_at > $2
          ORDER BY id DESC LIMIT 100`,
@@ -1259,7 +1265,8 @@ app.get('/api/conversations/:id/messages', authMiddleware, async (req, res) => {
       rows = q.rows;
     } else {
       const q = await pool.query(
-        `SELECT id, conversation_id, sender_id, sender_name, body, media_url, media_type, media_name, created_at
+        `SELECT id, conversation_id, sender_id, sender_name, body, media_url, media_type, media_name,
+                reply_to_id, reply_to_sender, reply_to_text, created_at
          FROM chat_messages
          WHERE conversation_id = $1 AND is_deleted = FALSE
          ORDER BY id DESC LIMIT 100`,
@@ -1278,6 +1285,9 @@ app.get('/api/conversations/:id/messages', authMiddleware, async (req, res) => {
         mediaUrl: r.media_url,
         mediaType: r.media_type,
         mediaName: r.media_name,
+        replyToId: r.reply_to_id ? Number(r.reply_to_id) : null,
+        replyToSender: r.reply_to_sender || null,
+        replyToText: r.reply_to_text || null,
         ts: new Date(r.created_at).getTime(),
       }))
       .reverse();
@@ -1753,6 +1763,9 @@ io.on('connection', async (socket) => {
     const mediaUrl = payload && payload.mediaUrl ? String(payload.mediaUrl) : null;
     const mediaType = payload && payload.mediaType ? String(payload.mediaType) : null;
     const mediaName = payload && payload.mediaName ? String(payload.mediaName) : null;
+    const replyToId = payload && payload.replyToId ? Number(payload.replyToId) : null;
+    const replyToSender = payload && payload.replyToSender ? String(payload.replyToSender).slice(0, 100) : null;
+    const replyToText = payload && payload.replyToText ? String(payload.replyToText).slice(0, 300) : null;
 
     if (!convId) return reply({ ok: false, error: 'Invalid conversation.' });
     if (!text && !mediaUrl) return reply({ ok: false, error: 'Message cannot be empty.' });
@@ -1785,10 +1798,10 @@ io.on('connection', async (socket) => {
 
       // Save message
       const msgRes = await pool.query(
-        `INSERT INTO chat_messages (conversation_id, sender_id, sender_name, body, media_url, media_type, media_name)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO chat_messages (conversation_id, sender_id, sender_name, body, media_url, media_type, media_name, reply_to_id, reply_to_sender, reply_to_text)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          RETURNING id, created_at`,
-        [convId, user.id, user.name, text, mediaUrl, mediaType, mediaName]
+        [convId, user.id, user.name, text, mediaUrl, mediaType, mediaName, replyToId, replyToSender, replyToText]
       );
 
       // Unhide conversation for all members when new message arrives
@@ -1803,6 +1816,9 @@ io.on('connection', async (socket) => {
         mediaUrl,
         mediaType,
         mediaName,
+        replyToId,
+        replyToSender,
+        replyToText,
         ts: new Date(msgRes.rows[0].created_at).getTime(),
       };
 
