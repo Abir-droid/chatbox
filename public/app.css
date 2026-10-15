@@ -635,8 +635,8 @@ button:active {
 .app {
   position: fixed;
   inset: 0;
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  height: 100%;
   height: 100dvh;
   display: flex;
   flex-direction: row;
@@ -4550,17 +4550,22 @@ dialog.lightbox-dialog::backdrop {
   background: var(--rail-bg);
   color: var(--rail-ink);
   border-left: 1px solid var(--rail-line);
-  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.45);
+  box-shadow: none;
   z-index: 105;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   transform: translateX(100%);
-  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  visibility: hidden;
+  pointer-events: none;
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.28s ease, box-shadow 0.28s ease;
 }
 
 .chat-info-panel.open {
   transform: translateX(0);
+  visibility: visible;
+  pointer-events: auto;
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.35);
 }
 
 .info-panel-view {
