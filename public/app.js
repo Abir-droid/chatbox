@@ -1252,6 +1252,7 @@
     el.input.disabled = false;
     el.send.disabled = false;
     el.input.placeholder = 'Type a message…';
+    adjustInputHeight();
 
     // Join room on socket and mark conversation as seen
     if (socket) {
@@ -2648,6 +2649,7 @@
 
     // Reset input and attachments immediately so the user can keep typing without waiting!
     el.input.value = '';
+    adjustInputHeight();
     clearMediaSelection();
     cancelReply();
     playSendSound();
@@ -2781,9 +2783,17 @@
     }
   });
 
+  function adjustInputHeight() {
+    if (!el.input) return;
+    el.input.style.height = 'auto';
+    const newHeight = Math.min(Math.max(el.input.scrollHeight, 38), 110);
+    el.input.style.height = newHeight + 'px';
+  }
+
   // Typing indicator broadcast & typing sound effect
   let typingTimer = null;
   el.input.oninput = () => {
+    adjustInputHeight();
     playTypingTick();
     if (!state.activeConversationId || !socket) return;
     socket.emit('typing', { conversationId: state.activeConversationId, typing: true });
@@ -3050,6 +3060,7 @@
       btn.textContent = emoji;
       btn.onclick = () => {
         el.input.value += emoji;
+        adjustInputHeight();
         el.emojiPicker.hidden = true;
         el.input.focus();
       };
