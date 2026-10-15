@@ -127,6 +127,7 @@ async function initDatabase() {
           media_url       TEXT,
           media_type      TEXT,
           media_name      TEXT,
+          media_list      JSONB,
           reply_to_id     BIGINT,
           reply_to_sender TEXT,
           reply_to_text   TEXT,
@@ -142,6 +143,7 @@ async function initDatabase() {
         ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_url TEXT;
         ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_type TEXT;
         ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_name TEXT;
+        ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_list JSONB;
         ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS reply_to_id BIGINT;
         ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS reply_to_sender TEXT;
         ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS reply_to_text TEXT;
@@ -179,6 +181,17 @@ async function initDatabase() {
         // Columns room/username may not exist in fresh installs
       }
 
+      // Permanently clear all accumulated ("jomanu") deleted messages
+      try {
+        await pool.query('DELETE FROM chat_messages WHERE is_deleted = TRUE');
+      } catch (err) {}
+
+      // Normalize existing Bangladesh phone numbers to 11 digits without country code
+      try {
+        await pool.query(`UPDATE chat_users SET phone = '0' || SUBSTRING(phone FROM 4) WHERE phone ~ '^8801[0-9]{9}$'`);
+        await pool.query(`UPDATE chat_users SET phone = '0' || SUBSTRING(phone FROM 5) WHERE phone ~ '^\\+8801[0-9]{9}$'`);
+      } catch (err) {}
+
       // Ensure at least one administrator exists if users are already registered
       try {
         const adminCheck = await pool.query('SELECT id FROM chat_users WHERE is_admin = TRUE LIMIT 1');
@@ -213,47 +226,73 @@ function sanitizePhone(phone) {
   return cleaned;
 }
 
+function normalizePhoneForStorage(phone) {
+  if (typeof phone !== 'string') return '';
+  const cleaned = sanitizePhone(phone);
+  if (!cleaned) return '';
+
+  // If explicit country code other than +880 is present, keep as international
+  if (cleaned.startsWith('+') && !cleaned.startsWith('+880')) {
+    return cleaned;
+  }
+
+  const digits = cleaned.replace(/\D/g, '');
+  if (!digits) return '';
+
+  // Bangladesh phone number normalization (stored as 11 digits: 01XXXXXXXXX without country code)
+  if (digits.startsWith('8801') && digits.length === 13) {
+    return '0' + digits.slice(3); // 01712345678
+  }
+  if (digits.startsWith('88001') && digits.length === 14) {
+    return '0' + digits.slice(4); // 01712345678
+  }
+  if (digits.startsWith('01') && digits.length === 11) {
+    return digits; // 01712345678
+  }
+  if (digits.startsWith('1') && digits.length === 10 && /^[3-9]/.test(digits.slice(1))) {
+    return '0' + digits; // 01712345678
+  }
+
+  return cleaned;
+}
+
 function getPhoneVariants(phone) {
   const cleaned = sanitizePhone(phone);
   if (!cleaned) return [];
   const set = new Set();
   set.add(cleaned);
 
+  const normalized = normalizePhoneForStorage(phone);
+  if (normalized) set.add(normalized);
+
   const digits = cleaned.replace(/\D/g, '');
 
-  // Bangladesh phone number normalization:
-  // 1) 13 digits starting with 8801: e.g. 8801712345678 (+8801712345678)
+  // Bangladesh phone number normalization variants:
   if (digits.startsWith('8801') && digits.length === 13) {
     const local = '0' + digits.slice(3); // 01712345678
     set.add(local);
     set.add('+' + digits);
     set.add(digits);
-    const withZero = '8800' + digits.slice(3); // 88001712345678
-    set.add('+' + withZero);
-    set.add(withZero);
-  }
-  // 2) 14 digits starting with 88001: e.g. 88001712345678 (+88001712345678)
-  else if (digits.startsWith('88001') && digits.length === 14) {
+  } else if (digits.startsWith('88001') && digits.length === 14) {
     const local = '0' + digits.slice(4); // 01712345678
     const standard = '880' + digits.slice(4); // 8801712345678
     set.add(local);
     set.add('+' + standard);
     set.add(standard);
-    set.add('+' + digits);
-    set.add(digits);
-  }
-  // 3) 11 digits starting with 01: e.g. 01712345678
-  else if (digits.startsWith('01') && digits.length === 11) {
+  } else if (digits.startsWith('01') && digits.length === 11) {
     const intl = '880' + digits.slice(1); // 8801712345678
     set.add(digits);
     set.add('+' + intl);
     set.add(intl);
-    const withZero = '8800' + digits.slice(1); // 88001712345678
-    set.add('+' + withZero);
-    set.add(withZero);
+  } else if (digits.startsWith('1') && digits.length === 10 && /^[3-9]/.test(digits.slice(1))) {
+    const local = '0' + digits;
+    const intl = '880' + digits;
+    set.add(local);
+    set.add('+' + intl);
+    set.add(intl);
   }
 
-  // 4) General international +/- variations
+  // General international +/- variations
   if (cleaned.startsWith('+')) {
     set.add(cleaned.slice(1));
   } else if (/^\d{7,16}$/.test(cleaned)) {
@@ -484,12 +523,17 @@ app.post('/api/auth/register', async (req, res) => {
   try {
     const name = String(req.body.name || '').trim();
     const phone = sanitizePhone(req.body.phone);
+    const phoneToStore = normalizePhoneForStorage(phone);
     const password = String(req.body.password || '');
 
     if (name.length < 2 || name.length > 50) {
       return res.status(400).json({ ok: false, error: 'Name must be between 2 and 50 characters.' });
     }
-    if (phone.length < 7 || phone.length > 16) {
+    if (phoneToStore.startsWith('01')) {
+      if (phoneToStore.length !== 11) {
+        return res.status(400).json({ ok: false, error: 'Bangladesh mobile number must be 11 digits (e.g. 01712345678).' });
+      }
+    } else if (phone.length < 7 || phone.length > 16) {
       return res.status(400).json({ ok: false, error: 'Please enter a valid phone number (7-16 digits).' });
     }
     if (password.length < 6) {
@@ -514,7 +558,7 @@ app.post('/api/auth/register', async (req, res) => {
       `INSERT INTO chat_users (phone, name, password_hash, avatar_color, is_admin)
        VALUES ($1, $2, $3, $4, $5)
        RETURNING id, phone, name, avatar_color, is_admin, created_at`,
-      [phone, name, hash, avatarColor, isAdmin]
+      [phoneToStore, name, hash, avatarColor, isAdmin]
     );
 
     const user = insertRes.rows[0];
@@ -1257,7 +1301,7 @@ app.get('/api/conversations/:id/messages', authMiddleware, async (req, res) => {
     let rows;
     if (clearedAt) {
       const q = await pool.query(
-        `SELECT id, conversation_id, sender_id, sender_name, body, media_url, media_type, media_name,
+        `SELECT id, conversation_id, sender_id, sender_name, body, media_url, media_type, media_name, media_list,
                 reply_to_id, reply_to_sender, reply_to_text, status, created_at
          FROM chat_messages
          WHERE conversation_id = $1 AND is_deleted = FALSE AND created_at > $2
@@ -1267,7 +1311,7 @@ app.get('/api/conversations/:id/messages', authMiddleware, async (req, res) => {
       rows = q.rows;
     } else {
       const q = await pool.query(
-        `SELECT id, conversation_id, sender_id, sender_name, body, media_url, media_type, media_name,
+        `SELECT id, conversation_id, sender_id, sender_name, body, media_url, media_type, media_name, media_list,
                 reply_to_id, reply_to_sender, reply_to_text, status, created_at
          FROM chat_messages
          WHERE conversation_id = $1 AND is_deleted = FALSE
@@ -1289,21 +1333,34 @@ app.get('/api/conversations/:id/messages', authMiddleware, async (req, res) => {
     } catch (e) {}
 
     const messages = rows
-      .map((r) => ({
-        id: Number(r.id),
-        conversationId: Number(r.conversation_id),
-        senderId: Number(r.sender_id),
-        senderName: r.sender_name,
-        text: r.body,
-        mediaUrl: r.media_url,
-        mediaType: r.media_type,
-        mediaName: r.media_name,
-        replyToId: r.reply_to_id ? Number(r.reply_to_id) : null,
-        replyToSender: r.reply_to_sender || null,
-        replyToText: r.reply_to_text || null,
-        status: r.status || 'sent',
-        ts: new Date(r.created_at).getTime(),
-      }))
+      .map((r) => {
+        let mediaList = null;
+        if (r.media_list) {
+          try {
+            mediaList = typeof r.media_list === 'string' ? JSON.parse(r.media_list) : r.media_list;
+          } catch {}
+        }
+        if (!mediaList && r.media_url) {
+          mediaList = [{ url: r.media_url, mediaType: r.media_type, mediaName: r.media_name }];
+        }
+
+        return {
+          id: Number(r.id),
+          conversationId: Number(r.conversation_id),
+          senderId: Number(r.sender_id),
+          senderName: r.sender_name,
+          text: r.body,
+          mediaUrl: r.media_url,
+          mediaType: r.media_type,
+          mediaName: r.media_name,
+          mediaList,
+          replyToId: r.reply_to_id ? Number(r.reply_to_id) : null,
+          replyToSender: r.reply_to_sender || null,
+          replyToText: r.reply_to_text || null,
+          status: r.status || 'sent',
+          ts: new Date(r.created_at).getTime(),
+        };
+      })
       .reverse();
 
     res.json({ ok: true, messages });
@@ -1369,12 +1426,12 @@ app.post('/api/upload-multiple', authMiddleware, upload.array('media', 20), (req
   res.json({ ok: true, files: results });
 });
 
-// Messages: Soft Delete
+// Messages: Delete (Telegram-style: gone without a trace)
 app.delete('/api/messages/:id', authMiddleware, async (req, res) => {
   try {
     const msgId = Number(req.params.id);
     const { rows } = await pool.query(
-      'SELECT id, conversation_id, sender_id, is_deleted FROM chat_messages WHERE id = $1',
+      'SELECT id, conversation_id, sender_id, media_url, media_list FROM chat_messages WHERE id = $1',
       [msgId]
     );
 
@@ -1388,8 +1445,30 @@ app.delete('/api/messages/:id', authMiddleware, async (req, res) => {
       return res.status(403).json({ ok: false, error: 'You can only delete your own messages.' });
     }
 
-    // Soft delete: marks is_deleted = TRUE (Preserved for admin audit!)
-    await pool.query('UPDATE chat_messages SET is_deleted = TRUE WHERE id = $1', [msgId]);
+    // Like Telegram: remove media files if present
+    const filesToDelete = [];
+    if (msg.media_url) filesToDelete.push(msg.media_url);
+    if (msg.media_list) {
+      try {
+        const list = typeof msg.media_list === 'string' ? JSON.parse(msg.media_list) : msg.media_list;
+        if (Array.isArray(list)) {
+          list.forEach((m) => { if (m && m.url) filesToDelete.push(m.url); });
+        }
+      } catch {}
+    }
+
+    for (const mUrl of filesToDelete) {
+      try {
+        const parts = mUrl.split('/static/uploads/');
+        if (parts.length > 1) {
+          const filePath = path.join(UPLOADS_DIR, path.basename(parts[1]));
+          if (fs.existsSync(filePath)) await fs.promises.unlink(filePath);
+        }
+      } catch (e) {}
+    }
+
+    // Hard delete - completely removed from database
+    await pool.query('DELETE FROM chat_messages WHERE id = $1', [msgId]);
 
     // Broadcast deletion in real time to conversation
     io.to(`c:${msg.conversation_id}`).emit('message_deleted', {
@@ -1411,7 +1490,6 @@ app.get('/api/admin/stats', authMiddleware, adminMiddleware, async (req, res) =>
   try {
     const usersRes = await pool.query('SELECT count(*)::int as count FROM chat_users');
     const messagesRes = await pool.query('SELECT count(*)::int as count FROM chat_messages');
-    const deletedRes = await pool.query('SELECT count(*)::int as count FROM chat_messages WHERE is_deleted = TRUE');
     const groupsRes = await pool.query("SELECT count(*)::int as count FROM chat_conversations WHERE type = 'group'");
     const directsRes = await pool.query("SELECT count(*)::int as count FROM chat_conversations WHERE type = 'direct'");
 
@@ -1421,7 +1499,6 @@ app.get('/api/admin/stats', authMiddleware, adminMiddleware, async (req, res) =>
         totalUsers: usersRes.rows[0].count,
         activeUsersOnline: onlineUsers.size,
         totalMessages: messagesRes.rows[0].count,
-        deletedMessages: deletedRes.rows[0].count,
         totalGroups: groupsRes.rows[0].count,
         totalDirectChats: directsRes.rows[0].count,
       },
@@ -1525,126 +1602,7 @@ app.get('/api/admin/conversations', authMiddleware, adminMiddleware, async (req,
   }
 });
 
-// Admin: Full conversation audit log (includes all messages even if deleted by users!)
-app.get('/api/admin/conversations/:id/audit', authMiddleware, adminMiddleware, async (req, res) => {
-  try {
-    const convId = Number(req.params.id);
-    const { rows } = await pool.query(
-      `SELECT m.id, m.conversation_id, m.sender_id, m.sender_name, u.phone as sender_phone,
-              m.body, m.media_url, m.media_type, m.media_name, m.is_deleted, m.created_at
-       FROM chat_messages m
-       LEFT JOIN chat_users u ON m.sender_id = u.id
-       WHERE m.conversation_id = $1
-       ORDER BY m.id ASC`,
-      [convId]
-    );
 
-    const messages = rows.map((r) => ({
-      id: Number(r.id),
-      conversationId: Number(r.conversation_id),
-      senderId: Number(r.sender_id),
-      senderName: r.sender_name,
-      senderPhone: r.sender_phone,
-      text: r.body,
-      mediaUrl: r.media_url,
-      mediaType: r.media_type,
-      mediaName: r.media_name,
-      isDeleted: Boolean(r.is_deleted),
-      ts: new Date(r.created_at).getTime(),
-    }));
-
-    res.json({ ok: true, messages });
-  } catch (err) {
-    console.error('Admin audit log error:', err);
-    res.status(500).json({ ok: false, error: 'Could not load audit log.' });
-  }
-});
-
-// Admin: Permanently delete (purge) a message from database
-app.delete('/api/admin/messages/:id/purge', authMiddleware, adminMiddleware, async (req, res) => {
-  try {
-    const msgId = Number(req.params.id);
-    const { rows } = await pool.query(
-      'SELECT id, conversation_id, media_url, is_deleted FROM chat_messages WHERE id = $1',
-      [msgId]
-    );
-
-    if (!rows.length) {
-      return res.status(404).json({ ok: false, error: 'Message not found.' });
-    }
-
-    const msg = rows[0];
-    const convId = Number(msg.conversation_id);
-
-    // Delete associated physical media file if stored locally
-    if (msg.media_url && typeof msg.media_url === 'string') {
-      try {
-        const parts = msg.media_url.split('/static/uploads/');
-        if (parts.length > 1) {
-          const filename = path.basename(parts[1]);
-          const filePath = path.join(UPLOADS_DIR, filename);
-          if (fs.existsSync(filePath)) {
-            await fs.promises.unlink(filePath);
-          }
-        }
-      } catch (fileErr) {
-        console.warn('Could not remove media file on purge:', fileErr.message);
-      }
-    }
-
-    // Hard delete permanently from database
-    await pool.query('DELETE FROM chat_messages WHERE id = $1', [msgId]);
-
-    // Broadcast purge event to conversation room and audit
-    io.to(`c:${convId}`).emit('message_purged', {
-      id: msgId,
-      conversationId: convId,
-    });
-
-    res.json({ ok: true, id: msgId, conversationId: convId });
-  } catch (err) {
-    console.error('Purge message error:', err);
-    res.status(500).json({ ok: false, error: 'Could not permanently delete message.' });
-  }
-});
-
-// Admin: Bulk permanently delete (purge) all soft-deleted messages in a conversation
-app.delete('/api/admin/conversations/:id/purge-deleted', authMiddleware, adminMiddleware, async (req, res) => {
-  try {
-    const convId = Number(req.params.id);
-    const { rows } = await pool.query(
-      'SELECT id, media_url FROM chat_messages WHERE conversation_id = $1 AND is_deleted = TRUE',
-      [convId]
-    );
-
-    for (const msg of rows) {
-      if (msg.media_url && typeof msg.media_url === 'string') {
-        try {
-          const parts = msg.media_url.split('/static/uploads/');
-          if (parts.length > 1) {
-            const filename = path.basename(parts[1]);
-            const filePath = path.join(UPLOADS_DIR, filename);
-            if (fs.existsSync(filePath)) {
-              await fs.promises.unlink(filePath);
-            }
-          }
-        } catch (fErr) {
-          // ignore file deletion errors
-        }
-      }
-    }
-
-    const deleteRes = await pool.query(
-      'DELETE FROM chat_messages WHERE conversation_id = $1 AND is_deleted = TRUE',
-      [convId]
-    );
-
-    res.json({ ok: true, purgedCount: deleteRes.rowCount || rows.length });
-  } catch (err) {
-    console.error('Bulk purge error:', err);
-    res.status(500).json({ ok: false, error: 'Could not purge deleted messages.' });
-  }
-});
 
 // Admin: Change user role (promote to admin or demote to regular user)
 app.post('/api/admin/users/:id/role', authMiddleware, adminMiddleware, async (req, res) => {
@@ -1796,15 +1754,22 @@ io.on('connection', async (socket) => {
     const reply = typeof ack === 'function' ? ack : () => {};
     const convId = Number(payload && payload.conversationId);
     const text = String((payload && payload.text) || '').trim();
-    const mediaUrl = payload && payload.mediaUrl ? String(payload.mediaUrl) : null;
-    const mediaType = payload && payload.mediaType ? String(payload.mediaType) : null;
-    const mediaName = payload && payload.mediaName ? String(payload.mediaName) : null;
+    const mediaList = (payload && Array.isArray(payload.mediaList) && payload.mediaList.length > 0) ? payload.mediaList : null;
+    let mediaUrl = payload && payload.mediaUrl ? String(payload.mediaUrl) : null;
+    let mediaType = payload && payload.mediaType ? String(payload.mediaType) : null;
+    let mediaName = payload && payload.mediaName ? String(payload.mediaName) : null;
     const replyToId = payload && payload.replyToId ? Number(payload.replyToId) : null;
     const replyToSender = payload && payload.replyToSender ? String(payload.replyToSender).slice(0, 100) : null;
     const replyToText = payload && payload.replyToText ? String(payload.replyToText).slice(0, 300) : null;
 
+    if (mediaList && mediaList.length > 0) {
+      if (!mediaUrl) mediaUrl = mediaList[0].url;
+      if (!mediaType) mediaType = mediaList[0].mediaType;
+      if (!mediaName) mediaName = mediaList[0].mediaName;
+    }
+
     if (!convId) return reply({ ok: false, error: 'Invalid conversation.' });
-    if (!text && !mediaUrl) return reply({ ok: false, error: 'Message cannot be empty.' });
+    if (!text && !mediaUrl && (!mediaList || !mediaList.length)) return reply({ ok: false, error: 'Message cannot be empty.' });
 
     try {
       // Verify membership
@@ -1845,11 +1810,12 @@ io.on('connection', async (socket) => {
       const initialStatus = anyOtherOnline ? 'delivered' : 'sent';
 
       // Save message
+      const mediaListJson = mediaList ? JSON.stringify(mediaList) : null;
       const msgRes = await pool.query(
-        `INSERT INTO chat_messages (conversation_id, sender_id, sender_name, body, media_url, media_type, media_name, reply_to_id, reply_to_sender, reply_to_text, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        `INSERT INTO chat_messages (conversation_id, sender_id, sender_name, body, media_url, media_type, media_name, media_list, reply_to_id, reply_to_sender, reply_to_text, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
          RETURNING id, created_at`,
-        [convId, user.id, user.name, text, mediaUrl, mediaType, mediaName, replyToId, replyToSender, replyToText, initialStatus]
+        [convId, user.id, user.name, text, mediaUrl, mediaType, mediaName, mediaListJson, replyToId, replyToSender, replyToText, initialStatus]
       );
 
       // Unhide conversation for all members when new message arrives
@@ -1864,6 +1830,7 @@ io.on('connection', async (socket) => {
         mediaUrl,
         mediaType,
         mediaName,
+        mediaList: mediaList || (mediaUrl ? [{ url: mediaUrl, mediaType, mediaName }] : null),
         replyToId,
         replyToSender,
         replyToText,
@@ -1875,16 +1842,22 @@ io.on('connection', async (socket) => {
       await pool.query('UPDATE chat_conversations SET updated_at = now() WHERE id = $1', [convId]);
 
       // Broadcast to active conversation room AND each member's personal user room
-      // (ensures members who haven't opened the conversation yet receive the live message instantly)
       const targetRooms = [`c:${convId}`];
       for (const m of members.rows) {
         targetRooms.push(`u:${m.user_id}`);
       }
       io.to(targetRooms).emit('message', msg);
 
-      const snippetText = mediaType === 'audio'
-        ? '🎤 Voice note'
-        : (mediaType === 'image' ? '📷 Photo' : (mediaType === 'video' ? '🎥 Video' : text));
+      let snippetText = text;
+      if (mediaList && mediaList.length > 1) {
+        snippetText = `📷 ${mediaList.length} media files`;
+      } else if (mediaType === 'audio') {
+        snippetText = '🎤 Voice note';
+      } else if (mediaType === 'image') {
+        snippetText = '📷 Photo';
+      } else if (mediaType === 'video') {
+        snippetText = '🎥 Video';
+      }
 
       for (const m of members.rows) {
         io.to(`u:${m.user_id}`).emit('conversation_updated', {

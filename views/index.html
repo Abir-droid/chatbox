@@ -71,9 +71,21 @@
 
         <div class="field">
           <label for="auth-phone">Phone Number</label>
-          <div class="input-wrap">
-            <svg class="input-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-            <input type="tel" id="auth-phone" placeholder="Phone number" autocomplete="tel" required>
+          <div class="input-wrap phone-wrap">
+            <select class="country-select" id="auth-country" aria-label="Country Code">
+              <option value="+880" data-max="11" data-local-prefix="0" selected>🇧🇩 +880</option>
+              <option value="+1" data-max="10">🇺🇸 +1</option>
+              <option value="+44" data-max="10">🇬🇧 +44</option>
+              <option value="+91" data-max="10">🇮🇳 +91</option>
+              <option value="+966" data-max="9">🇸🇦 +966</option>
+              <option value="+971" data-max="9">🇦🇪 +971</option>
+              <option value="+60" data-max="10">🇲🇾 +60</option>
+              <option value="+65" data-max="8">🇸🇬 +65</option>
+              <option value="+974" data-max="8">🇶🇦 +974</option>
+              <option value="+965" data-max="8">🇰🇼 +965</option>
+              <option value="+968" data-max="8">🇴🇲 +968</option>
+            </select>
+            <input type="tel" id="auth-phone" placeholder="01XXXXXXXXX" autocomplete="tel" required maxlength="11">
           </div>
         </div>
 
@@ -417,9 +429,21 @@
       <form id="dm-form">
         <div class="field">
           <label for="dm-phone">Friend's Phone Number</label>
-          <div class="input-wrap">
-            <svg class="input-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-            <input type="tel" id="dm-phone" placeholder="Phone number" required>
+          <div class="input-wrap phone-wrap">
+            <select class="country-select" id="dm-country" aria-label="Country Code">
+              <option value="+880" data-max="11" data-local-prefix="0" selected>🇧🇩 +880</option>
+              <option value="+1" data-max="10">🇺🇸 +1</option>
+              <option value="+44" data-max="10">🇬🇧 +44</option>
+              <option value="+91" data-max="10">🇮🇳 +91</option>
+              <option value="+966" data-max="9">🇸🇦 +966</option>
+              <option value="+971" data-max="9">🇦🇪 +971</option>
+              <option value="+60" data-max="10">🇲🇾 +60</option>
+              <option value="+65" data-max="8">🇸🇬 +65</option>
+              <option value="+974" data-max="8">🇶🇦 +974</option>
+              <option value="+965" data-max="8">🇰🇼 +965</option>
+              <option value="+968" data-max="8">🇴🇲 +968</option>
+            </select>
+            <input type="tel" id="dm-phone" placeholder="01XXXXXXXXX" required maxlength="11">
           </div>
         </div>
         <p class="field-error" id="dm-error"></p>
@@ -474,9 +498,21 @@
       <form id="friend-form">
         <div class="field">
           <label for="friend-phone">Friend's Phone Number</label>
-          <div class="input-wrap">
-            <svg class="input-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-            <input type="tel" id="friend-phone" placeholder="Phone number" required>
+          <div class="input-wrap phone-wrap">
+            <select class="country-select" id="friend-country" aria-label="Country Code">
+              <option value="+880" data-max="11" data-local-prefix="0" selected>🇧🇩 +880</option>
+              <option value="+1" data-max="10">🇺🇸 +1</option>
+              <option value="+44" data-max="10">🇬🇧 +44</option>
+              <option value="+91" data-max="10">🇮🇳 +91</option>
+              <option value="+966" data-max="9">🇸🇦 +966</option>
+              <option value="+971" data-max="9">🇦🇪 +971</option>
+              <option value="+60" data-max="10">🇲🇾 +60</option>
+              <option value="+65" data-max="8">🇸🇬 +65</option>
+              <option value="+974" data-max="8">🇶🇦 +974</option>
+              <option value="+965" data-max="8">🇰🇼 +965</option>
+              <option value="+968" data-max="8">🇴🇲 +968</option>
+            </select>
+            <input type="tel" id="friend-phone" placeholder="01XXXXXXXXX" required maxlength="11">
           </div>
         </div>
         <p class="field-error" id="friend-error"></p>
@@ -500,9 +536,21 @@
       </div>
 
       <form id="add-member-form" class="inline-add-form">
-        <div class="input-wrap flex-1">
-          <svg class="input-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-          <input type="tel" id="new-member-phone" placeholder="Phone number" required>
+        <div class="input-wrap phone-wrap flex-1">
+          <select class="country-select" id="new-member-country" aria-label="Country Code">
+            <option value="+880" data-max="11" data-local-prefix="0" selected>🇧🇩 +880</option>
+            <option value="+1" data-max="10">🇺🇸 +1</option>
+            <option value="+44" data-max="10">🇬🇧 +44</option>
+            <option value="+91" data-max="10">🇮🇳 +91</option>
+            <option value="+966" data-max="9">🇸🇦 +966</option>
+            <option value="+971" data-max="9">🇦🇪 +971</option>
+            <option value="+60" data-max="10">🇲🇾 +60</option>
+            <option value="+65" data-max="8">🇸🇬 +65</option>
+            <option value="+974" data-max="8">🇶🇦 +974</option>
+            <option value="+965" data-max="8">🇰🇼 +965</option>
+            <option value="+968" data-max="8">🇴🇲 +968</option>
+          </select>
+          <input type="tel" id="new-member-phone" placeholder="01XXXXXXXXX" required maxlength="11">
         </div>
         <button type="submit" class="primary">Add Member</button>
       </form>
@@ -605,8 +653,30 @@
   <!-- Modal: Media Lightbox -->
   <dialog id="lightbox-dialog" class="lightbox-dialog">
     <div class="lightbox-content">
-      <button type="button" class="lightbox-close" id="lightbox-close" aria-label="Close lightbox">✕</button>
-      <img id="lightbox-img" src="" alt="Enlarged media">
+      <div class="lightbox-top-actions">
+        <button type="button" class="icon-btn lightbox-download-btn" id="lightbox-download-btn" title="Download media" aria-label="Download media">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+        </button>
+        <button type="button" class="icon-btn lightbox-close" id="lightbox-close" title="Close" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="lightbox-media-container" id="lightbox-media-container">
+        <img id="lightbox-img" src="" alt="Enlarged media" hidden>
+        <video id="lightbox-video" src="" controls playsinline autoplay hidden></video>
+      </div>
+      <div class="lightbox-gallery-wrap" id="lightbox-gallery-wrap">
+        <div class="lightbox-gallery" id="lightbox-gallery">
+          <!-- Populated dynamically with all media in the active chat -->
+        </div>
+      </div>
     </div>
   </dialog>
 
@@ -616,7 +686,7 @@
       <div class="dialog-header">
         <div class="admin-header-title">
           <svg viewBox="0 0 24 24" class="admin-icon" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-          <h2 id="admin-title">Administrator Audit & Moderation Dashboard</h2>
+          <h2 id="admin-title">Administrator Moderation Dashboard</h2>
         </div>
         <button type="button" class="icon-btn close-dialog" data-dialog="admin-dialog" aria-label="Close dialog">✕</button>
       </div>
@@ -643,24 +713,6 @@
           </div>
           <span class="stat-num" id="stat-messages">0</span>
         </div>
-        <div class="stat-card">
-          <div class="stat-header">
-            <svg viewBox="0 0 24 24" class="stat-icon danger" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-            <span class="stat-label">Deleted by Users</span>
-          </div>
-          <span class="stat-num" id="stat-deleted">0</span>
-        </div>
-      </div>
-
-      <div class="admin-nav-tabs">
-        <button type="button" class="admin-tab active" id="admin-tab-users">
-          <svg viewBox="0 0 24 24" class="tab-btn-icon" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
-          <span>User Moderation</span>
-        </button>
-        <button type="button" class="admin-tab" id="admin-tab-chats">
-          <svg viewBox="0 0 24 24" class="tab-btn-icon" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <span>Chat Audit Log (With Deleted Messages)</span>
-        </button>
       </div>
 
       <!-- Admin Panel: Users Management -->
@@ -681,23 +733,6 @@
           </table>
         </div>
       </div>
-
-      <!-- Admin Panel: Conversations & Full History Audit -->
-      <div class="admin-view" id="admin-view-chats" hidden>
-        <div class="audit-layout">
-          <div class="audit-sidebar">
-            <span class="audit-sub">Select conversation to audit:</span>
-            <ul class="audit-conv-list" id="audit-conv-list"></ul>
-          </div>
-          <div class="audit-thread">
-            <div class="audit-thread-header" id="audit-thread-header">
-              Select a conversation on the left to inspect its messages.
-            </div>
-            <ol class="audit-messages" id="audit-messages"></ol>
-          </div>
-        </div>
-      </div>
-
     </div>
   </dialog>
 

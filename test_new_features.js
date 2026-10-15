@@ -452,8 +452,8 @@ async function run() {
   assert.equal(loginRahimIntl.json.user.id, userRahim.id);
   console.log('  ✔ Seamless login verified using both +880 and 01 formats');
 
-  // 9. Admin Permanent Deletion (Purge) of Deleted Messages
-  console.log('\n[Test 9] Admin Permanent Deletion (Purge) of Soft-Deleted Messages...');
+  // 9. Telegram-Style Hard Deletion (No Trace Left Behind & No Admin Audit)
+  console.log('\n[Test 9] Telegram-Style Hard Deletion (Leaves No Trace Behind)...');
 
   // Connect socket for Kamal to send a message
   const socketKamal = Client(`http://127.0.0.1:${PORT}`, {
@@ -466,7 +466,7 @@ async function run() {
   await new Promise((resolve) => {
     socketKamal.emit(
       'message',
-      { conversationId: convIdKR, text: 'Sensitive message to be permanently purged' },
+      { conversationId: convIdKR, text: 'Sensitive message to be permanently removed' },
       (ack) => {
         assert.equal(ack.ok, true);
         msgIdToPurge = ack.id;
@@ -475,74 +475,32 @@ async function run() {
     );
   });
 
-  // Kamal soft deletes the message
-  const softDelRes = await request(`/api/messages/${msgIdToPurge}`, {
+  // Kamal deletes the message
+  const hardDelRes = await request(`/api/messages/${msgIdToPurge}`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${tokenKamal}` },
   });
-  assert.equal(softDelRes.status, 200);
+  assert.equal(hardDelRes.status, 200);
+  assert.equal(hardDelRes.json.ok, true);
 
-  // Soft-deleted message is hidden from regular chat history
+  // Deleted message is completely gone from chat history
   const normalHistory = await request(`/api/conversations/${convIdKR}/messages`, {
     headers: { Authorization: `Bearer ${tokenKamal}` },
   });
   assert.equal(normalHistory.status, 200);
   assert.equal(normalHistory.json.messages.length, 0);
 
-  // Admin (Dave) audit log preserves and sees the deleted message
-  const auditBefore = await request(`/api/admin/conversations/${convIdKR}/audit`, {
+  // Deleted message is completely wiped from PostgreSQL database table (no trace left behind)
+  const { rows: dbRows } = await getPool().query('SELECT * FROM chat_messages WHERE id = $1', [msgIdToPurge]);
+  assert.equal(dbRows.length, 0, 'Message row must be completely deleted from chat_messages table');
+  console.log('  ✔ Message permanently erased from database table with zero trace left behind');
+
+  // Admin audit log endpoint is removed (returns 404)
+  const auditRes = await request(`/api/admin/conversations/${convIdKR}/audit`, {
     headers: { Authorization: `Bearer ${tokenDave}` },
   });
-  assert.equal(auditBefore.status, 200);
-  assert.equal(auditBefore.json.messages.length, 1);
-  assert.equal(auditBefore.json.messages[0].isDeleted, true);
-  console.log('  ✔ Soft-deleted message hidden from users but visible to Admin in audit log');
-
-  // Non-admin (Rahim) attempts to permanently purge message -> 403 Forbidden
-  const forbiddenPurge = await request(`/api/admin/messages/${msgIdToPurge}/purge`, {
-    method: 'DELETE',
-    headers: { Authorization: `Bearer ${tokenRahim}` },
-  });
-  assert.equal(forbiddenPurge.status, 403);
-  console.log('  ✔ Non-admin users cannot permanently purge messages (403 Forbidden)');
-
-  // Admin (Dave) permanently purges the message from database
-  const purgeRes = await request(`/api/admin/messages/${msgIdToPurge}/purge`, {
-    method: 'DELETE',
-    headers: { Authorization: `Bearer ${tokenDave}` },
-  });
-  assert.equal(purgeRes.status, 200);
-  assert.equal(purgeRes.json.ok, true);
-
-  // Verify message is completely gone from the database audit log as well
-  const auditAfter = await request(`/api/admin/conversations/${convIdKR}/audit`, {
-    headers: { Authorization: `Bearer ${tokenDave}` },
-  });
-  assert.equal(auditAfter.status, 200);
-  assert.equal(auditAfter.json.messages.length, 0);
-  console.log('  ✔ Admin permanently purged message: completely deleted from database and audit log');
-
-  // Test bulk purge of all deleted messages in conversation
-  await new Promise((resolve) => {
-    socketKamal.emit('message', { conversationId: convIdKR, text: 'Deleted 1' }, () => resolve());
-  });
-  await new Promise((resolve) => {
-    socketKamal.emit('message', { conversationId: convIdKR, text: 'Deleted 2' }, () => resolve());
-  });
-  const msgsRes = await request(`/api/conversations/${convIdKR}/messages`, {
-    headers: { Authorization: `Bearer ${tokenKamal}` },
-  });
-  for (const m of msgsRes.json.messages) {
-    await request(`/api/messages/${m.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${tokenKamal}` } });
-  }
-
-  const bulkPurgeRes = await request(`/api/admin/conversations/${convIdKR}/purge-deleted`, {
-    method: 'DELETE',
-    headers: { Authorization: `Bearer ${tokenDave}` },
-  });
-  assert.equal(bulkPurgeRes.status, 200);
-  assert.equal(bulkPurgeRes.json.purgedCount, 2);
-  console.log('  ✔ Admin bulk purged all soft-deleted messages in conversation');
+  assert.equal(auditRes.status, 404, 'Admin audit endpoint should no longer exist');
+  console.log('  ✔ Admin audit review removed as requested');
 
   // 10. Admin Role Promotion & Claim Admin
   console.log('\n[Test 10] Admin Role Management & Claim Admin...');

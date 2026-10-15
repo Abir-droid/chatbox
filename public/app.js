@@ -16,6 +16,7 @@
     tabRegister: $('tab-register'),
     nameField: $('name-field'),
     authName: $('auth-name'),
+    authCountry: $('auth-country'),
     authPhone: $('auth-phone'),
     authPassword: $('auth-password'),
     togglePwBtn: $('toggle-pw-btn'),
@@ -108,6 +109,7 @@
     tabNewDm: $('tab-new-dm'),
     tabNewGroup: $('tab-new-group'),
     dmForm: $('dm-form'),
+    dmCountry: $('dm-country'),
     dmPhone: $('dm-phone'),
     dmError: $('dm-error'),
     groupForm: $('group-form'),
@@ -117,11 +119,13 @@
 
     addFriendDialog: $('add-friend-dialog'),
     friendForm: $('friend-form'),
+    friendCountry: $('friend-country'),
     friendPhone: $('friend-phone'),
     friendError: $('friend-error'),
 
     groupMembersDialog: $('group-members-dialog'),
     addMemberForm: $('add-member-form'),
+    newMemberCountry: $('new-member-country'),
     newMemberPhone: $('new-member-phone'),
     addMemberError: $('add-member-error'),
     membersList: $('members-list'),
@@ -143,21 +147,17 @@
 
     lightboxDialog: $('lightbox-dialog'),
     lightboxImg: $('lightbox-img'),
+    lightboxVideo: $('lightbox-video'),
+    lightboxDownloadBtn: $('lightbox-download-btn'),
     lightboxClose: $('lightbox-close'),
+    lightboxGalleryWrap: $('lightbox-gallery-wrap'),
+    lightboxGallery: $('lightbox-gallery'),
 
     adminDialog: $('admin-dialog'),
     statUsers: $('stat-users'),
     statOnline: $('stat-online'),
     statMessages: $('stat-messages'),
-    statDeleted: $('stat-deleted'),
-    adminTabUsers: $('admin-tab-users'),
-    adminTabChats: $('admin-tab-chats'),
-    adminViewUsers: $('admin-view-users'),
-    adminViewChats: $('admin-view-chats'),
     adminUsersTbody: $('admin-users-tbody'),
-    auditConvList: $('audit-conv-list'),
-    auditThreadHeader: $('audit-thread-header'),
-    auditMessages: $('audit-messages'),
 
     // Selection Bar
     selectionBar: $('selection-bar'),
@@ -523,6 +523,82 @@
     });
   }
 
+  /* ------------------------------------------------------------- phone & country normalization */
+  function getNormalizedPhone(countrySelect, phoneInput) {
+    if (!phoneInput) return '';
+    let raw = (phoneInput.value || '').trim();
+    const country = countrySelect ? countrySelect.value : '+880';
+
+    // If string already contains BD country code
+    if (raw.startsWith('+880')) {
+      raw = raw.slice(4);
+    } else if (raw.startsWith('880')) {
+      raw = raw.slice(3);
+    }
+
+    // Keep only digits
+    let digits = raw.replace(/[^\d]/g, '');
+
+    // For Bangladesh (+880) or 10-11 digit numbers starting with 01 / 1
+    if (country === '+880' || digits.startsWith('01') || (digits.startsWith('1') && digits.length === 10)) {
+      if (digits.startsWith('1') && digits.length === 10) {
+        digits = '0' + digits;
+      }
+      return digits.slice(0, 11);
+    }
+
+    if (raw.startsWith('+')) {
+      return '+' + digits;
+    }
+    return country ? `${country}${digits}` : digits;
+  }
+
+  function setupCountryPhoneInput(countrySelect, phoneInput) {
+    if (!phoneInput) return;
+
+    function applyFormat() {
+      const countryCode = countrySelect ? countrySelect.value : '+880';
+      const opt = countrySelect ? countrySelect.selectedOptions[0] : null;
+      const maxLen = opt && opt.dataset.max ? parseInt(opt.dataset.max, 10) : 11;
+
+      if (countryCode === '+880') {
+        phoneInput.placeholder = '01XXXXXXXXX';
+        phoneInput.maxLength = 11;
+      } else {
+        phoneInput.placeholder = 'Phone number';
+        phoneInput.maxLength = maxLen;
+      }
+    }
+
+    if (countrySelect) {
+      countrySelect.addEventListener('change', () => {
+        applyFormat();
+        phoneInput.focus();
+      });
+      applyFormat();
+    }
+
+    phoneInput.addEventListener('input', () => {
+      let val = phoneInput.value;
+      if (val.startsWith('+880')) {
+        if (countrySelect) countrySelect.value = '+880';
+        val = '0' + val.slice(4).replace(/[^\d]/g, '');
+        phoneInput.value = val.slice(0, 11);
+      } else if (val.startsWith('8801')) {
+        if (countrySelect) countrySelect.value = '+880';
+        val = '0' + val.slice(3).replace(/[^\d]/g, '');
+        phoneInput.value = val.slice(0, 11);
+      } else {
+        phoneInput.value = val.replace(/[^\d]/g, '');
+      }
+    });
+  }
+
+  setupCountryPhoneInput(el.authCountry, el.authPhone);
+  setupCountryPhoneInput(el.dmCountry, el.dmPhone);
+  setupCountryPhoneInput(el.friendCountry, el.friendPhone);
+  setupCountryPhoneInput(el.newMemberCountry, el.newMemberPhone);
+
   /* ----------------------------------------------------------------- auth UI */
   let isRegisterMode = false;
 
@@ -542,9 +618,22 @@
     e.preventDefault();
     el.authError.hidden = true;
 
-    const phone = el.authPhone.value.trim();
+    const phone = getNormalizedPhone(el.authCountry, el.authPhone);
     const password = el.authPassword.value;
     const name = el.authName.value.trim();
+
+    const countryCode = el.authCountry ? el.authCountry.value : '+880';
+    if (countryCode === '+880') {
+      if (!/^01[3-9]\d{8}$/.test(phone)) {
+        el.authError.textContent = 'Please enter a valid 11-digit Bangladeshi phone number (e.g. 017XXXXXXXX)';
+        el.authError.hidden = false;
+        return;
+      }
+    } else if (!phone || phone.length < 5) {
+      el.authError.textContent = 'Please enter a valid phone number';
+      el.authError.hidden = false;
+      return;
+    }
 
     el.authSubmit.disabled = true;
     el.authSubmit.textContent = isRegisterMode ? 'Creating account…' : 'Signing in…';
@@ -854,13 +943,7 @@
     });
 
     socket.on('message_deleted', ({ id, conversationId }) => {
-      if (state.activeConversationId === conversationId) {
-        const bubble = $(`msg-bubble-${id}`);
-        if (bubble) {
-          bubble.className = 'bubble deleted';
-          bubble.textContent = 'This message was deleted';
-        }
-      }
+      removeMessageRow(id);
     });
 
     socket.on('typing', ({ conversationId, userId, userName, typing }) => {
@@ -1153,6 +1236,60 @@
     }
   }
 
+  function removeMessageRow(id) {
+    state.messagesCache.delete(id);
+    if (state.selectedMessageIds.has(id)) {
+      state.selectedMessageIds.delete(id);
+      updateSelectionBar();
+    }
+    const row = $(`msg-${id}`);
+    if (row) {
+      row.style.transition = 'opacity 0.22s ease, transform 0.22s ease, max-height 0.25s ease';
+      row.style.opacity = '0';
+      row.style.transform = 'scale(0.95)';
+      setTimeout(() => {
+        row.remove();
+        if (el.messages && el.messages.children.length === 0) {
+          el.emptyState.hidden = false;
+        }
+      }, 220);
+    }
+  }
+
+  async function downloadMediaFile(url, defaultName) {
+    if (!url) return;
+    try {
+      toast('Downloading media…');
+      const response = await fetch(url);
+      if (!response.ok) throw new Error('Download failed');
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = blobUrl;
+      let filename = defaultName || '';
+      if (!filename || filename === 'Photo' || filename === 'Video' || filename === 'Voice note' || filename === 'Media') {
+        const ext = url.split('.').pop().split('?')[0] || 'bin';
+        filename = `chatbox-${Date.now()}.${ext}`;
+      }
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(blobUrl);
+      }, 1000);
+    } catch {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = defaultName || 'download';
+      a.target = '_blank';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+  }
+
   function appendMessage(msg, isLastInCluster = true) {
     el.emptyState.hidden = true;
     state.messagesCache.set(msg.id, msg);
@@ -1263,26 +1400,96 @@
       bubble.appendChild(quoteDiv);
     }
 
-    // Media (Photo, Video, or Audio / Voice Note)
-    const mediaUrl = msg.mediaUrl || msg.media_url;
-    let isAudio = false;
-    let isVideo = false;
-    let mediaDiv = null;
+    // Media Handling: Multiple Media Collage or Single Media
+    const rawMediaList = Array.isArray(msg.mediaList) && msg.mediaList.length > 0
+      ? msg.mediaList
+      : (msg.mediaUrl || msg.media_url ? [{
+          url: msg.mediaUrl || msg.media_url,
+          mediaType: msg.mediaType || msg.media_type,
+          mediaName: msg.mediaName || msg.media_name,
+        }] : []);
 
-    if (mediaUrl) {
-      mediaDiv = document.createElement('div');
-      const rawType = (msg.mediaType || msg.media_type || '').toLowerCase();
-      const mediaName = (msg.mediaName || msg.media_name || '').toLowerCase();
-      isAudio =
+    if (rawMediaList.length > 1) {
+      if (!msg.text) {
+        bubble.classList.add('has-media-only');
+      } else {
+        bubble.classList.add('has-media');
+      }
+
+      const collage = document.createElement('div');
+      const count = rawMediaList.length;
+      if (count === 2) {
+        collage.className = 'msg-media-collage collage-2';
+      } else if (count === 3) {
+        collage.className = 'msg-media-collage collage-3';
+      } else {
+        collage.className = 'msg-media-collage collage-4';
+      }
+
+      const displayItems = rawMediaList.slice(0, 4);
+      const remaining = count - 4;
+
+      displayItems.forEach((item, index) => {
+        const itemEl = document.createElement('div');
+        itemEl.className = 'collage-item';
+
+        const rawType = (item.mediaType || '').toLowerCase();
+        const isVid = rawType === 'video' || rawType.startsWith('video/') || /\.(mp4|mov|mkv)(\?|$)/i.test(item.url);
+
+        if (isVid) {
+          const video = document.createElement('video');
+          video.src = item.url;
+          video.preload = 'metadata';
+          video.muted = true;
+          itemEl.appendChild(video);
+
+          const badge = document.createElement('div');
+          badge.className = 'collage-video-badge';
+          badge.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg> Video';
+          itemEl.appendChild(badge);
+        } else {
+          const img = document.createElement('img');
+          img.src = item.url;
+          img.alt = item.mediaName || 'Photo';
+          img.loading = 'lazy';
+          itemEl.appendChild(img);
+        }
+
+        if (index === 3 && remaining > 0) {
+          const overlay = document.createElement('div');
+          overlay.className = 'collage-overlay';
+          overlay.textContent = `+${remaining}`;
+          itemEl.appendChild(overlay);
+        }
+
+        itemEl.onclick = (e) => {
+          e.stopPropagation();
+          openLightbox(item);
+        };
+
+        collage.appendChild(itemEl);
+      });
+
+      bubble.appendChild(collage);
+    } else if (rawMediaList.length === 1) {
+      const singleItem = rawMediaList[0];
+      const mediaUrl = singleItem.url;
+      const rawType = (singleItem.mediaType || '').toLowerCase();
+      const mediaName = (singleItem.mediaName || '').toLowerCase();
+
+      const isAudio =
         rawType === 'audio' ||
         rawType.startsWith('audio/') ||
         mediaName.includes('voice note') ||
         /\.(webm|ogg|wav|mp3|m4a|aac|opus)(\?|$)/i.test(mediaUrl);
-      isVideo =
+
+      const isVideo =
         !isAudio &&
         (rawType === 'video' ||
          rawType.startsWith('video/') ||
          /\.(mp4|mov|mkv)(\?|$)/i.test(mediaUrl));
+
+      const mediaDiv = document.createElement('div');
 
       if (isAudio) {
         bubble.classList.add('has-audio');
@@ -1317,9 +1524,9 @@
         mediaDiv.className = 'msg-media';
         const img = document.createElement('img');
         img.src = mediaUrl;
-        img.alt = msg.mediaName || 'Photo';
+        img.alt = singleItem.mediaName || 'Photo';
         img.loading = 'lazy';
-        img.onclick = () => openLightbox(mediaUrl);
+        img.onclick = () => openLightbox(singleItem);
         mediaDiv.appendChild(img);
       }
       bubble.appendChild(mediaDiv);
@@ -1378,7 +1585,6 @@
         downBtn.classList.add('active');
         li.classList.add('show-menu');
 
-        // Check if menu would overflow below the visible log area
         dropdown.classList.remove('open-up');
         if (el.log) {
           const dRect = dropdown.getBoundingClientRect();
@@ -1536,44 +1742,16 @@
     dropdown.appendChild(selectItem);
 
     // Option 4: Download Media (if media present)
-    if (mediaUrl) {
+    const primaryMedia = rawMediaList[0];
+    if (primaryMedia && primaryMedia.url) {
       const downloadItem = document.createElement('button');
       downloadItem.type = 'button';
       downloadItem.className = 'msg-dropdown-item';
       downloadItem.innerHTML = '<svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>Download media</span>';
-      downloadItem.onclick = async (e) => {
+      downloadItem.onclick = (e) => {
         e.stopPropagation();
         closeAllDropdowns();
-        try {
-          toast('Downloading media…');
-          const response = await fetch(mediaUrl);
-          if (!response.ok) throw new Error('Download failed');
-          const blob = await response.blob();
-          const blobUrl = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.style.display = 'none';
-          a.href = blobUrl;
-          let filename = msg.mediaName || '';
-          if (!filename || filename === 'Photo' || filename === 'Video' || filename === 'Voice note') {
-            const ext = mediaUrl.split('.').pop().split('?')[0] || 'bin';
-            filename = `chatbox-${Date.now()}.${ext}`;
-          }
-          a.download = filename;
-          document.body.appendChild(a);
-          a.click();
-          setTimeout(() => {
-            document.body.removeChild(a);
-            URL.revokeObjectURL(blobUrl);
-          }, 1000);
-        } catch (err) {
-          const a = document.createElement('a');
-          a.href = mediaUrl;
-          a.download = msg.mediaName || 'download';
-          a.target = '_blank';
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-        }
+        downloadMediaFile(primaryMedia.url, primaryMedia.mediaName);
       };
       dropdown.appendChild(downloadItem);
     }
@@ -1602,19 +1780,10 @@
   }
 
   async function deleteMessage(msgId) {
-    if (!confirm('Delete this message?')) return;
+    if (!confirm('Delete this message permanently?')) return;
     try {
       await api(`/api/messages/${msgId}`, { method: 'DELETE' });
-      const row = $(`msg-${msgId}`);
-      if (row) {
-        const menu = row.querySelector('.msg-menu-wrap');
-        if (menu) menu.remove();
-      }
-      const bubble = $(`msg-bubble-${msgId}`);
-      if (bubble) {
-        bubble.className = 'bubble deleted';
-        bubble.textContent = 'This message was deleted';
-      }
+      removeMessageRow(msgId);
     } catch (err) {
       toast(err.message);
     }
@@ -2025,18 +2194,194 @@
     el.replyCancel.onclick = cancelReply;
   }
 
-  function openLightbox(url) {
-    el.lightboxImg.src = url;
-    el.lightboxDialog.showModal();
+  let currentLightboxMedia = null;
+
+  function getChatMediaItems() {
+    const list = [];
+    const seen = new Set();
+    if (!state.messagesCache) return list;
+    for (const msg of state.messagesCache.values()) {
+      if (msg.conversationId !== state.activeConversationId && msg.conversation_id !== state.activeConversationId) {
+        continue;
+      }
+      if (Array.isArray(msg.mediaList) && msg.mediaList.length > 0) {
+        for (const item of msg.mediaList) {
+          if (!item || !item.url || seen.has(item.url)) continue;
+          const isAudio = (item.mediaType && item.mediaType.startsWith('audio/')) || /\.(webm|ogg|wav|mp3|m4a|aac|opus)(\?|$)/i.test(item.url);
+          if (!isAudio) {
+            seen.add(item.url);
+            list.push({
+              url: item.url,
+              mediaType: item.mediaType || 'image',
+              mediaName: item.mediaName || 'Photo',
+              msgId: msg.id,
+            });
+          }
+        }
+      } else if (msg.mediaUrl || msg.media_url) {
+        const u = msg.mediaUrl || msg.media_url;
+        if (!u || seen.has(u)) continue;
+        const mt = (msg.mediaType || msg.media_type || '').toLowerCase();
+        const mn = (msg.mediaName || msg.media_name || '').toLowerCase();
+        const isAudio = mt.startsWith('audio/') || mn.includes('voice note') || /\.(webm|ogg|wav|mp3|m4a|aac|opus)(\?|$)/i.test(u);
+        if (!isAudio) {
+          seen.add(u);
+          list.push({
+            url: u,
+            mediaType: mt || 'image',
+            mediaName: msg.mediaName || msg.media_name || 'Photo',
+            msgId: msg.id,
+          });
+        }
+      }
+    }
+    return list;
   }
 
-  el.lightboxClose.onclick = () => el.lightboxDialog.close();
+  function displayLightboxItem(item) {
+    if (!item || !item.url) return;
+    currentLightboxMedia = item;
+    const rawType = (item.mediaType || '').toLowerCase();
+    const isVideo = rawType === 'video' || rawType.startsWith('video/') || /\.(mp4|mov|mkv)(\?|$)/i.test(item.url);
 
-  el.lightboxDialog.onclick = (e) => {
-    if (e.target !== el.lightboxImg) {
+    if (isVideo) {
+      if (el.lightboxImg) {
+        el.lightboxImg.hidden = true;
+        el.lightboxImg.src = '';
+      }
+      if (el.lightboxVideo) {
+        el.lightboxVideo.hidden = false;
+        el.lightboxVideo.src = item.url;
+        el.lightboxVideo.play().catch(() => {});
+      }
+    } else {
+      if (el.lightboxVideo) {
+        el.lightboxVideo.hidden = true;
+        el.lightboxVideo.pause();
+        el.lightboxVideo.src = '';
+      }
+      if (el.lightboxImg) {
+        el.lightboxImg.hidden = false;
+        el.lightboxImg.src = item.url;
+      }
+    }
+
+    if (el.lightboxGallery) {
+      const thumbs = el.lightboxGallery.querySelectorAll('.lightbox-gallery-thumb');
+      thumbs.forEach((thumb) => {
+        if (thumb.dataset.url === item.url) {
+          thumb.classList.add('active');
+          thumb.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+        } else {
+          thumb.classList.remove('active');
+        }
+      });
+    }
+  }
+
+  function renderLightboxGallery(activeUrl) {
+    if (!el.lightboxGallery) return;
+    el.lightboxGallery.replaceChildren();
+    const mediaItems = getChatMediaItems();
+
+    if (mediaItems.length <= 1) {
+      if (el.lightboxGalleryWrap) el.lightboxGalleryWrap.hidden = true;
+      return;
+    }
+
+    if (el.lightboxGalleryWrap) el.lightboxGalleryWrap.hidden = false;
+
+    mediaItems.forEach((item) => {
+      const thumb = document.createElement('div');
+      thumb.className = `lightbox-gallery-thumb ${item.url === activeUrl ? 'active' : ''}`;
+      thumb.dataset.url = item.url;
+
+      const rawType = (item.mediaType || '').toLowerCase();
+      const isVideo = rawType === 'video' || rawType.startsWith('video/') || /\.(mp4|mov|mkv)(\?|$)/i.test(item.url);
+
+      if (isVideo) {
+        const vid = document.createElement('video');
+        vid.src = item.url;
+        vid.preload = 'metadata';
+        vid.muted = true;
+        const iconWrap = document.createElement('div');
+        iconWrap.className = 'thumb-video-icon';
+        iconWrap.innerHTML = '<svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>';
+        thumb.append(vid, iconWrap);
+      } else {
+        const img = document.createElement('img');
+        img.src = item.url;
+        img.alt = item.mediaName || 'Thumbnail';
+        img.loading = 'lazy';
+        thumb.appendChild(img);
+      }
+
+      thumb.onclick = (e) => {
+        e.stopPropagation();
+        displayLightboxItem(item);
+      };
+
+      el.lightboxGallery.appendChild(thumb);
+    });
+  }
+
+  function openLightbox(media) {
+    const item = typeof media === 'string'
+      ? { url: media, mediaType: 'image', mediaName: 'Media' }
+      : media;
+    if (!item || !item.url) return;
+
+    displayLightboxItem(item);
+    renderLightboxGallery(item.url);
+    if (el.lightboxDialog && !el.lightboxDialog.open) {
+      el.lightboxDialog.showModal();
+    }
+  }
+
+  function closeLightbox() {
+    if (el.lightboxVideo) {
+      el.lightboxVideo.pause();
+      el.lightboxVideo.src = '';
+    }
+    if (el.lightboxImg) {
+      el.lightboxImg.src = '';
+    }
+    currentLightboxMedia = null;
+    if (el.lightboxDialog && el.lightboxDialog.open) {
       el.lightboxDialog.close();
     }
-  };
+  }
+
+  if (el.lightboxDownloadBtn) {
+    el.lightboxDownloadBtn.onclick = (e) => {
+      e.stopPropagation();
+      if (currentLightboxMedia && currentLightboxMedia.url) {
+        downloadMediaFile(currentLightboxMedia.url, currentLightboxMedia.mediaName);
+      }
+    };
+  }
+
+  if (el.lightboxClose) {
+    el.lightboxClose.onclick = () => closeLightbox();
+  }
+
+  if (el.lightboxDialog) {
+    el.lightboxDialog.onclick = (e) => {
+      if (e.target === el.lightboxDialog || e.target.classList.contains('lightbox-content') || e.target.classList.contains('lightbox-media-container')) {
+        closeLightbox();
+      }
+    };
+    el.lightboxDialog.addEventListener('close', () => {
+      if (el.lightboxVideo) {
+        el.lightboxVideo.pause();
+        el.lightboxVideo.src = '';
+      }
+      if (el.lightboxImg) {
+        el.lightboxImg.src = '';
+      }
+      currentLightboxMedia = null;
+    });
+  }
 
   /* ------------------------------------------------------------- sending */
   el.composer.onsubmit = async (e) => {
@@ -2072,28 +2417,26 @@
 
         const uploadedList = data.files || [{ url: data.url, mediaType: data.mediaType, mediaName: data.mediaName }];
 
-        for (let i = 0; i < uploadedList.length; i++) {
-          const item = uploadedList[i];
-          const payload = {
-            conversationId: state.activeConversationId,
-            text: i === 0 ? text : '',
-            mediaUrl: item.url,
-            mediaType: item.mediaType,
-            mediaName: item.mediaName,
-          };
+        const payload = {
+          conversationId: state.activeConversationId,
+          text,
+          mediaUrl: uploadedList[0].url,
+          mediaType: uploadedList[0].mediaType,
+          mediaName: uploadedList[0].mediaName,
+          mediaList: uploadedList,
+        };
 
-          if (i === 0 && state.replyTarget) {
-            payload.replyToId = state.replyTarget.id;
-            payload.replyToSender = state.replyTarget.senderName;
-            payload.replyToText = state.replyTarget.text;
-          }
-
-          socket.emit('message', payload, (ack) => {
-            if (ack && !ack.ok) {
-              toast(ack.error || 'Failed to send message');
-            }
-          });
+        if (state.replyTarget) {
+          payload.replyToId = state.replyTarget.id;
+          payload.replyToSender = state.replyTarget.senderName;
+          payload.replyToText = state.replyTarget.text;
         }
+
+        socket.emit('message', payload, (ack) => {
+          if (ack && !ack.ok) {
+            toast(ack.error || 'Failed to send message');
+          }
+        });
       } else {
         const payload = {
           conversationId: state.activeConversationId,
@@ -2684,46 +3027,84 @@
   };
 
   /* ------------------------------------------------------------- group friends picker */
+  function getEligibleGroupContacts() {
+    const map = new Map();
+    if (state.friends && state.friends.length) {
+      for (const f of state.friends) {
+        if (!f || !f.phone) continue;
+        map.set(f.phone, {
+          id: f.id,
+          phone: f.phone,
+          name: f.name || f.phone,
+          avatarColor: f.avatarColor || 0,
+          avatarUrl: f.avatarUrl || null,
+        });
+      }
+    }
+    if (state.conversations && state.conversations.length) {
+      for (const conv of state.conversations) {
+        if (conv.type === 'dm' && conv.otherUserPhone) {
+          if (!map.has(conv.otherUserPhone)) {
+            map.set(conv.otherUserPhone, {
+              id: conv.otherUserId,
+              phone: conv.otherUserPhone,
+              name: conv.title || conv.otherUserName || conv.otherUserPhone,
+              avatarColor: conv.avatarColor || 0,
+              avatarUrl: conv.avatarUrl || null,
+            });
+          } else {
+            const existing = map.get(conv.otherUserPhone);
+            if ((!existing.name || existing.name === existing.phone) && conv.title && conv.title !== conv.otherUserPhone) {
+              existing.name = conv.title;
+            }
+          }
+        }
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }
+
   function renderGroupFriendsPicker(filterText = '') {
     if (!el.groupFriendsList) return;
     el.groupFriendsList.replaceChildren();
     const q = (filterText || '').toLowerCase().trim();
 
-    if (!state.friends || !state.friends.length) {
+    const contacts = getEligibleGroupContacts();
+    if (!contacts.length) {
       const empty = document.createElement('div');
       empty.className = 'picker-empty';
-      empty.textContent = 'You have no friends yet. Add friends first to create a group.';
+      empty.textContent = 'No friends or contacts available yet. Start a chat or add friends first.';
       el.groupFriendsList.appendChild(empty);
       return;
     }
 
-    const filtered = state.friends.filter((f) => {
-      return !q || f.name.toLowerCase().includes(q) || f.phone.includes(q);
+    const filtered = contacts.filter((c) => {
+      return !q || c.name.toLowerCase().includes(q) || c.phone.includes(q);
     });
 
     if (!filtered.length) {
       const empty = document.createElement('div');
       empty.className = 'picker-empty';
-      empty.textContent = `No friends match "${escapeHtml(filterText)}"`;
+      empty.textContent = `No contacts match "${escapeHtml(filterText)}"`;
       el.groupFriendsList.appendChild(empty);
       return;
     }
 
-    filtered.forEach((friend) => {
+    filtered.forEach((contact) => {
       const label = document.createElement('label');
       label.className = 'group-friend-row';
 
       const check = document.createElement('input');
       check.type = 'checkbox';
       check.className = 'group-friend-check';
-      check.value = friend.phone;
-      check.checked = state.selectedGroupFriends.has(friend.phone);
+      check.value = contact.phone;
+      check.checked = state.selectedGroupFriends.has(contact.phone);
 
       check.onchange = () => {
         if (check.checked) {
-          state.selectedGroupFriends.add(friend.phone);
+          state.selectedGroupFriends.add(contact.phone);
         } else {
-          state.selectedGroupFriends.delete(friend.phone);
+          state.selectedGroupFriends.delete(contact.phone);
         }
         if (el.groupFriendsCount) {
           el.groupFriendsCount.textContent = `${state.selectedGroupFriends.size} selected`;
@@ -2732,16 +3113,16 @@
 
       const avatar = document.createElement('span');
       avatar.className = 'avatar small';
-      renderAvatar(avatar, friend.name, friend.avatarColor, friend.avatarUrl);
+      renderAvatar(avatar, contact.name, contact.avatarColor, contact.avatarUrl);
 
       const info = document.createElement('div');
       info.className = 'group-friend-info';
       const name = document.createElement('span');
       name.className = 'group-friend-name';
-      name.textContent = friend.name;
+      name.textContent = contact.name;
       const phone = document.createElement('span');
       phone.className = 'group-friend-phone';
-      phone.textContent = friend.phone;
+      phone.textContent = contact.phone;
       info.append(name, phone);
 
       label.append(check, avatar, info);
@@ -2784,7 +3165,8 @@
     e.preventDefault();
     el.dmError.replaceChildren();
     try {
-      const phone = el.dmPhone.value.trim();
+      const phone = getNormalizedPhone(el.dmCountry, el.dmPhone);
+      if (!phone) throw new Error('Please enter a valid phone number');
       const data = await api('/api/conversations/direct', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2807,7 +3189,8 @@
         reqBtn.onclick = async () => {
           reqBtn.disabled = true;
           reqBtn.textContent = 'Sending…';
-          const ok = await sendFriendRequest(el.dmPhone.value.trim());
+          const normalized = getNormalizedPhone(el.dmCountry, el.dmPhone);
+          const ok = await sendFriendRequest(normalized);
           if (ok) el.newChatDialog.close();
         };
         el.dmError.append(span, reqBtn);
@@ -2859,7 +3242,8 @@
     e.preventDefault();
     el.friendError.textContent = '';
     try {
-      const phone = el.friendPhone.value.trim();
+      const phone = getNormalizedPhone(el.friendCountry, el.friendPhone);
+      if (!phone) throw new Error('Please enter a valid phone number');
       const data = await api('/api/friends/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3099,7 +3483,8 @@
     e.preventDefault();
     el.addMemberError.textContent = '';
     try {
-      const phone = el.newMemberPhone.value.trim();
+      const phone = getNormalizedPhone(el.newMemberCountry, el.newMemberPhone);
+      if (!phone) throw new Error('Please enter a valid phone number');
       await api(`/api/conversations/${state.activeConversationId}/members`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3129,29 +3514,12 @@
     loadAdminUsers();
   };
 
-  el.adminTabUsers.onclick = () => {
-    el.adminTabUsers.classList.add('active');
-    el.adminTabChats.classList.remove('active');
-    el.adminViewUsers.hidden = false;
-    el.adminViewChats.hidden = true;
-    loadAdminUsers();
-  };
-
-  el.adminTabChats.onclick = () => {
-    el.adminTabChats.classList.add('active');
-    el.adminTabUsers.classList.remove('active');
-    el.adminViewChats.hidden = false;
-    el.adminViewUsers.hidden = true;
-    loadAdminConversations();
-  };
-
   async function loadAdminStats() {
     try {
       const data = await api('/api/admin/stats');
-      el.statUsers.textContent = data.stats.totalUsers;
-      el.statOnline.textContent = data.stats.activeUsersOnline;
-      el.statMessages.textContent = data.stats.totalMessages;
-      el.statDeleted.textContent = data.stats.deletedMessages;
+      if (el.statUsers) el.statUsers.textContent = data.stats.totalUsers;
+      if (el.statOnline) el.statOnline.textContent = data.stats.activeUsersOnline;
+      if (el.statMessages) el.statMessages.textContent = data.stats.totalMessages;
     } catch (err) {
       console.error('Admin stats error:', err);
     }
@@ -3243,132 +3611,6 @@
       toast(`User ${suspend ? 'blocked' : 'unblocked'}`);
       loadAdminUsers();
       loadAdminStats();
-    } catch (err) {
-      toast(err.message);
-    }
-  }
-
-  async function loadAdminConversations() {
-    try {
-      const data = await api('/api/admin/conversations');
-      el.auditConvList.replaceChildren();
-
-      for (const conv of data.conversations || []) {
-        const li = document.createElement('li');
-        li.className = 'audit-conv-item';
-        li.innerHTML = `<strong>${conv.name}</strong> <span style="font-size:0.75rem;color:var(--muted)">(${conv.type}, ${conv.totalMessages} msgs)</span>`;
-        li.onclick = () => loadConversationAuditLog(conv);
-        el.auditConvList.appendChild(li);
-      }
-    } catch (err) {
-      toast(err.message);
-    }
-  }
-
-  async function loadConversationAuditLog(conv) {
-    document.querySelectorAll('.audit-conv-item').forEach((i) => i.classList.remove('active'));
-
-    function renderAuditHeader() {
-      el.auditThreadHeader.replaceChildren();
-      const titleSpan = document.createElement('span');
-      titleSpan.textContent = `Auditing: ${conv.name} (${conv.totalMessages} total, ${conv.deletedMessages} deleted by users)`;
-      el.auditThreadHeader.appendChild(titleSpan);
-
-      if (conv.deletedMessages > 0) {
-        const purgeAllBtn = document.createElement('button');
-        purgeAllBtn.type = 'button';
-        purgeAllBtn.className = 'audit-purge-all-btn';
-        purgeAllBtn.innerHTML = '<svg viewBox="0 0 24 24" class="btn-icon" aria-hidden="true" style="width:13px;height:13px;display:inline-block;vertical-align:-2px;margin-right:4px"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>Purge All Deleted';
-        purgeAllBtn.onclick = async () => {
-          if (!confirm(`Permanently delete all ${conv.deletedMessages} deleted messages in "${conv.name}"? This cannot be undone.`)) {
-            return;
-          }
-          try {
-            const res = await api(`/api/admin/conversations/${conv.id}/purge-deleted`, { method: 'DELETE' });
-            toast(`Purged ${res.purgedCount || conv.deletedMessages} deleted messages.`);
-            conv.totalMessages = Math.max(0, conv.totalMessages - (res.purgedCount || conv.deletedMessages));
-            conv.deletedMessages = 0;
-            loadConversationAuditLog(conv);
-            loadAdminStats();
-            loadAdminConversations();
-          } catch (err) {
-            toast(err.message);
-          }
-        };
-        el.auditThreadHeader.appendChild(purgeAllBtn);
-      }
-    }
-
-    renderAuditHeader();
-
-    try {
-      const data = await api(`/api/admin/conversations/${conv.id}/audit`);
-      el.auditMessages.replaceChildren();
-
-      for (const m of data.messages || []) {
-        const li = document.createElement('li');
-        li.className = `audit-msg-item ${m.isDeleted ? 'deleted-flag' : ''}`;
-
-        const header = document.createElement('div');
-        header.style.fontSize = '0.78rem';
-        header.style.color = 'var(--muted)';
-        header.style.marginBottom = '4px';
-        header.style.display = 'flex';
-        header.style.alignItems = 'center';
-        header.style.flexWrap = 'wrap';
-        header.style.gap = '6px';
-        header.innerHTML = `<strong>${m.senderName}</strong> (${m.senderPhone || 'ID:' + m.senderId}) • ${new Date(
-          m.ts
-        ).toLocaleString()}`;
-
-        if (m.isDeleted) {
-          const badge = document.createElement('span');
-          badge.className = 'audit-deleted-badge';
-          badge.textContent = 'DELETED BY USER';
-          header.appendChild(badge);
-
-          const purgeBtn = document.createElement('button');
-          purgeBtn.type = 'button';
-          purgeBtn.className = 'audit-purge-btn';
-          purgeBtn.title = 'Permanently delete this message from the database';
-          purgeBtn.innerHTML = '<svg viewBox="0 0 24 24" class="btn-icon" aria-hidden="true" style="width:12px;height:12px;display:inline-block;vertical-align:-1px;margin-right:3px"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>Permanently Delete';
-          purgeBtn.onclick = async (e) => {
-            e.stopPropagation();
-            if (!confirm('Are you sure you want to PERMANENTLY delete this message from the database? This cannot be undone.')) {
-              return;
-            }
-            try {
-              await api(`/api/admin/messages/${m.id}/purge`, { method: 'DELETE' });
-              toast('Message permanently purged from database.');
-              li.remove();
-              conv.deletedMessages = Math.max(0, (conv.deletedMessages || 1) - 1);
-              conv.totalMessages = Math.max(0, (conv.totalMessages || 1) - 1);
-              renderAuditHeader();
-              loadAdminStats();
-            } catch (err) {
-              toast(err.message);
-            }
-          };
-          header.appendChild(purgeBtn);
-        }
-
-        const body = document.createElement('div');
-        if (m.text) {
-          const p = document.createElement('p');
-          p.textContent = m.text;
-          body.appendChild(p);
-        }
-        if (m.mediaUrl) {
-          const mediaLink = document.createElement('a');
-          mediaLink.href = m.mediaUrl;
-          mediaLink.target = '_blank';
-          mediaLink.textContent = `[View Attached ${m.mediaType}: ${m.mediaName || 'media'}]`;
-          body.appendChild(mediaLink);
-        }
-
-        li.append(header, body);
-        el.auditMessages.appendChild(li);
-      }
     } catch (err) {
       toast(err.message);
     }

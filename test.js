@@ -259,35 +259,32 @@ async function runTests() {
   assert.equal(receivedMsg.mediaUrl, '/static/uploads/sample.png');
   console.log('  ✔ Direct message with photo attachment received in real time by Bob');
 
-  // Test 6: Soft Deletion & Admin Audit Log
-  console.log('\n[7/8] Testing Soft Delete & Admin Audit Log (Showing Deleted Messages)...');
+  // Test 6: Telegram-style Hard Deletion (Leaves No Trace Behind)
+  console.log('\n[7/8] Testing Telegram-Style Message Deletion (Leaves No Trace Behind)...');
   {
-    // Bob deletes the message
+    // Alice deletes the message
     const delRes = await request(`/api/messages/${sentMessageId}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${tokenAlice}` },
     });
     assert.equal(delRes.status, 200);
-    console.log('  ✔ Message soft-deleted by user');
+    assert.equal(delRes.json.ok, true);
+    console.log('  ✔ Message hard-deleted by user');
 
     // Regular conversation history now EXCLUDES the deleted message
     const msgsRes = await request(`/api/conversations/${directConvId}/messages`, {
       headers: { Authorization: `Bearer ${tokenAlice}` },
     });
     const foundInRegular = msgsRes.json.messages.some((m) => m.id === sentMessageId);
-    assert.equal(foundInRegular, false, 'Deleted message should not be visible to regular user');
-    console.log('  ✔ Deleted message hidden from regular conversation history');
+    assert.equal(foundInRegular, false, 'Deleted message should not be visible to user');
+    console.log('  ✔ Deleted message completely removed from conversation history');
 
-    // Admin audit endpoint INCLUDES the deleted message!
+    // Admin audit endpoint is removed (returns 404)
     const auditRes = await request(`/api/admin/conversations/${directConvId}/audit`, {
       headers: { Authorization: `Bearer ${tokenAlice}` },
     });
-    assert.equal(auditRes.status, 200);
-    const auditedMsg = auditRes.json.messages.find((m) => m.id === sentMessageId);
-    assert.ok(auditedMsg, 'Admin can see the deleted message');
-    assert.equal(auditedMsg.isDeleted, true);
-    assert.equal(auditedMsg.text, 'Hey Bob, check this out!');
-    console.log('  ✔ Admin audit log successfully preserved and revealed deleted message text!');
+    assert.equal(auditRes.status, 404, 'Admin audit endpoint should no longer exist');
+    console.log('  ✔ Admin audit log removed as requested');
   }
 
   // Test 7: Admin Moderation & User Suspension
