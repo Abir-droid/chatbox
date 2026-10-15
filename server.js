@@ -130,6 +130,7 @@ async function initDatabase() {
           reply_to_id     BIGINT,
           reply_to_sender TEXT,
           reply_to_text   TEXT,
+          status          TEXT NOT NULL DEFAULT 'sent',
           is_deleted      BOOLEAN NOT NULL DEFAULT FALSE,
           created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
         );
@@ -144,6 +145,7 @@ async function initDatabase() {
         ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS reply_to_id BIGINT;
         ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS reply_to_sender TEXT;
         ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS reply_to_text TEXT;
+        ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'sent';
         ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE;
 
         -- Migrations for profile pic, conversation clear, and friend requests
@@ -1256,7 +1258,7 @@ app.get('/api/conversations/:id/messages', authMiddleware, async (req, res) => {
     if (clearedAt) {
       const q = await pool.query(
         `SELECT id, conversation_id, sender_id, sender_name, body, media_url, media_type, media_name,
-                reply_to_id, reply_to_sender, reply_to_text, created_at
+                reply_to_id, reply_to_sender, reply_to_text, status, created_at
          FROM chat_messages
          WHERE conversation_id = $1 AND is_deleted = FALSE AND created_at > $2
          ORDER BY id DESC LIMIT 100`,
@@ -1266,7 +1268,7 @@ app.get('/api/conversations/:id/messages', authMiddleware, async (req, res) => {
     } else {
       const q = await pool.query(
         `SELECT id, conversation_id, sender_id, sender_name, body, media_url, media_type, media_name,
-                reply_to_id, reply_to_sender, reply_to_text, created_at
+                reply_to_id, reply_to_sender, reply_to_text, status, created_at
          FROM chat_messages
          WHERE conversation_id = $1 AND is_deleted = FALSE
          ORDER BY id DESC LIMIT 100`,
@@ -1274,6 +1276,17 @@ app.get('/api/conversations/:id/messages', authMiddleware, async (req, res) => {
       );
       rows = q.rows;
     }
+
+    // Automatically mark messages from others in this conversation as seen
+    try {
+      const seenRes = await pool.query(
+        "UPDATE chat_messages SET status = 'seen' WHERE conversation_id = $1 AND sender_id != $2 AND status != 'seen'",
+        [convId, req.user.id]
+      );
+      if (seenRes.rowCount > 0 && typeof io !== 'undefined') {
+        io.to(`c:${convId}`).emit('conversation_seen', { conversationId: convId, seenBy: req.user.id });
+      }
+    } catch (e) {}
 
     const messages = rows
       .map((r) => ({
@@ -1288,6 +1301,7 @@ app.get('/api/conversations/:id/messages', authMiddleware, async (req, res) => {
         replyToId: r.reply_to_id ? Number(r.reply_to_id) : null,
         replyToSender: r.reply_to_sender || null,
         replyToText: r.reply_to_text || null,
+        status: r.status || 'sent',
         ts: new Date(r.created_at).getTime(),
       }))
       .reverse();
@@ -1796,12 +1810,24 @@ io.on('connection', async (socket) => {
         }
       }
 
+      // Fetch conversation members
+      const members = await pool.query(
+        'SELECT user_id FROM chat_conversation_members WHERE conversation_id = $1',
+        [convId]
+      );
+
+      // Check if any other member is currently connected
+      const anyOtherOnline = members.rows.some(
+        (m) => Number(m.user_id) !== user.id && onlineUsers.has(Number(m.user_id))
+      );
+      const initialStatus = anyOtherOnline ? 'delivered' : 'sent';
+
       // Save message
       const msgRes = await pool.query(
-        `INSERT INTO chat_messages (conversation_id, sender_id, sender_name, body, media_url, media_type, media_name, reply_to_id, reply_to_sender, reply_to_text)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        `INSERT INTO chat_messages (conversation_id, sender_id, sender_name, body, media_url, media_type, media_name, reply_to_id, reply_to_sender, reply_to_text, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          RETURNING id, created_at`,
-        [convId, user.id, user.name, text, mediaUrl, mediaType, mediaName, replyToId, replyToSender, replyToText]
+        [convId, user.id, user.name, text, mediaUrl, mediaType, mediaName, replyToId, replyToSender, replyToText, initialStatus]
       );
 
       // Unhide conversation for all members when new message arrives
@@ -1819,17 +1845,12 @@ io.on('connection', async (socket) => {
         replyToId,
         replyToSender,
         replyToText,
+        status: initialStatus,
         ts: new Date(msgRes.rows[0].created_at).getTime(),
       };
 
       // Update conversation updated_at
       await pool.query('UPDATE chat_conversations SET updated_at = now() WHERE id = $1', [convId]);
-
-      // Fetch conversation members
-      const members = await pool.query(
-        'SELECT user_id FROM chat_conversation_members WHERE conversation_id = $1',
-        [convId]
-      );
 
       // Broadcast to active conversation room AND each member's personal user room
       // (ensures members who haven't opened the conversation yet receive the live message instantly)
@@ -1871,6 +1892,38 @@ io.on('connection', async (socket) => {
       userName: user.name,
       typing: Boolean(typing),
     });
+  });
+
+  // Message delivered acknowledgment
+  socket.on('message_delivered', async ({ messageId, conversationId }) => {
+    const msgId = Number(messageId);
+    if (!msgId) return;
+    try {
+      const res = await pool.query(
+        "UPDATE chat_messages SET status = 'delivered' WHERE id = $1 AND status = 'sent' RETURNING sender_id, conversation_id",
+        [msgId]
+      );
+      if (res.rows.length) {
+        const senderId = Number(res.rows[0].sender_id);
+        const cId = Number(res.rows[0].conversation_id);
+        io.to(`u:${senderId}`).emit('message_status_update', { messageId: msgId, status: 'delivered', conversationId: cId });
+      }
+    } catch (e) {}
+  });
+
+  // Conversation seen acknowledgment
+  socket.on('conversation_seen', async ({ conversationId }) => {
+    const convId = Number(conversationId);
+    if (!convId) return;
+    try {
+      const res = await pool.query(
+        "UPDATE chat_messages SET status = 'seen' WHERE conversation_id = $1 AND sender_id != $2 AND status != 'seen'",
+        [convId, user.id]
+      );
+      if (res.rowCount > 0) {
+        io.to(`c:${convId}`).emit('conversation_seen', { conversationId: convId, seenBy: user.id });
+      }
+    } catch (e) {}
   });
 
   // Disconnect

@@ -1251,11 +1251,69 @@ button:active {
   color: var(--ink-secondary);
 }
 
-.msg-check {
-  width: 14px;
-  height: 14px;
-  fill: var(--accent);
-  margin-left: 2px;
+.msg-check-wrap {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.tick-svg {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.tick-svg.sent {
+  color: #94a3b8;
+  width: 13px;
+  height: 13px;
+}
+
+.tick-svg.delivered {
+  color: #94a3b8;
+  width: 17px;
+  height: 13px;
+}
+
+.tick-svg.seen {
+  color: #38bdf8;
+  width: 17px;
+  height: 13px;
+}
+
+.swipe-reply-icon {
+  position: absolute;
+  left: 6px;
+  top: calc(50% + 10px);
+  transform: translateY(-50%) scale(0.85);
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--ink-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.6;
+  pointer-events: none;
+  z-index: 0;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+
+.swipe-reply-icon svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+}
+
+.msg-body:has(.swipe-reply-ready) .swipe-reply-icon,
+.msg-row:has(.swipe-reply-ready) .swipe-reply-icon {
+  opacity: 1;
+  background: var(--accent);
+  color: #fff;
+  transform: translateY(-50%) scale(1.15);
 }
 
 .bubble {
@@ -3563,4 +3621,437 @@ dialog[open] .dialog-card {
     width: 18px;
     height: 18px;
   }
+}
+
+/* ==========================================================================
+   Feature: Message Selection Mode & Forwarding
+   ========================================================================== */
+.msg-select-check {
+  display: none;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--line-strong, #64748b);
+  background: var(--surface);
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  align-self: center;
+  margin-right: 10px;
+  transition: all 0.15s ease;
+  color: transparent;
+  user-select: none;
+}
+
+.msg-row.own .msg-select-check {
+  margin-right: 0;
+  margin-left: 10px;
+}
+
+.msg-select-check svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.messages.selection-mode .msg-select-check {
+  display: flex;
+}
+
+.messages.selection-mode .msg-row {
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 14px;
+  transition: background 0.12s ease;
+}
+
+.messages.selection-mode .msg-row:hover {
+  background: rgba(56, 189, 248, 0.05);
+}
+
+.msg-row.selected {
+  background: rgba(56, 189, 248, 0.1) !important;
+}
+
+.msg-row.selected .msg-select-check {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.selection-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 1.4rem;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.12);
+  z-index: 50;
+  animation: slideUpIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.selection-bar[hidden] {
+  display: none !important;
+}
+
+.selection-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.selection-close-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.selection-close-btn svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  stroke-width: 2.2;
+}
+
+.selection-count {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.selection-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.selection-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 1.15rem;
+  border-radius: 9999px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  background: var(--accent);
+  color: #fff;
+  transition: all 0.15s ease;
+}
+
+.selection-action-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.selection-action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.selection-action-btn:not(:disabled):hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+
+/* ==========================================================================
+   Feature: Drag and Drop Overlay
+   ========================================================================== */
+.drag-drop-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(8px);
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  animation: fadeIn 0.18s ease;
+  pointer-events: none;
+}
+
+.drag-drop-overlay[hidden] {
+  display: none !important;
+}
+
+.drag-drop-card {
+  border: 2px dashed var(--accent);
+  border-radius: 24px;
+  background: rgba(30, 41, 59, 0.75);
+  padding: 3rem 2.5rem;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 420px;
+  width: 100%;
+  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.4), 0 0 30px rgba(56, 189, 248, 0.15);
+}
+
+.drag-drop-icon-wrap {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: rgba(56, 189, 248, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 1.25rem;
+  color: var(--accent);
+  animation: bounceSoft 1.5s infinite ease-in-out;
+}
+
+.drag-drop-icon {
+  width: 36px;
+  height: 36px;
+}
+
+.drag-drop-title {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 0.4rem;
+}
+
+.drag-drop-subtitle {
+  font-size: 0.9rem;
+  color: #94a3b8;
+}
+
+@keyframes bounceSoft {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+/* ==========================================================================
+   Feature: Group Friends Picker
+   ========================================================================== */
+.field-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.4rem;
+}
+
+.field-counter {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.group-friends-list {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-2);
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+}
+
+.group-friend-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+  user-select: none;
+}
+
+.group-friend-row:hover {
+  background: var(--surface);
+}
+
+.group-friend-check {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.group-friend-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.group-friend-name {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-friend-phone {
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+
+.picker-empty {
+  padding: 1.5rem 1rem;
+  text-align: center;
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+
+/* ==========================================================================
+   Feature: Forward Dialog
+   ========================================================================== */
+.forward-card {
+  width: 440px;
+  max-width: 95vw;
+}
+
+.forward-search-wrap {
+  margin-bottom: 0.85rem;
+}
+
+.forward-list {
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-2);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  margin-bottom: 1.25rem;
+}
+
+.forward-target-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+  user-select: none;
+}
+
+.forward-target-item:hover {
+  background: var(--surface);
+}
+
+.forward-target-check {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.forward-target-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.forward-target-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.forward-target-sub {
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+
+.forward-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.forward-selected-count {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin-right: auto;
+}
+
+/* ==========================================================================
+   Feature: In-App Notification Prompt Modal
+   ========================================================================== */
+.notif-prompt-card {
+  width: 400px;
+  max-width: 92vw;
+  text-align: center;
+  padding: 2.2rem 2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.notif-prompt-graphic {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: rgba(56, 189, 248, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 1.25rem;
+}
+
+.notif-prompt-glow {
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(56, 189, 248, 0.25) 0%, transparent 70%);
+}
+
+.notif-prompt-icon {
+  width: 34px;
+  height: 34px;
+  stroke: var(--accent);
+  position: relative;
+  z-index: 1;
+}
+
+.notif-prompt-title {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 0.6rem;
+}
+
+.notif-prompt-desc {
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--muted);
+  margin-bottom: 1.6rem;
+}
+
+.notif-prompt-actions {
+  display: flex;
+  gap: 0.75rem;
+  width: 100%;
+  justify-content: center;
 }

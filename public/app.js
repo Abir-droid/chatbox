@@ -155,6 +155,32 @@
     auditThreadHeader: $('audit-thread-header'),
     auditMessages: $('audit-messages'),
 
+    // Selection Bar
+    selectionBar: $('selection-bar'),
+    selectionCloseBtn: $('selection-close-btn'),
+    selectionCount: $('selection-count'),
+    selectionForwardBtn: $('selection-forward-btn'),
+
+    // Drag Drop Overlay
+    dragDropOverlay: $('drag-drop-overlay'),
+
+    // Group Friend Picker
+    groupFriendsCount: $('group-friends-count'),
+    groupFriendsSearch: $('group-friends-search'),
+    groupFriendsList: $('group-friends-list'),
+
+    // Forward Dialog
+    forwardDialog: $('forward-dialog'),
+    forwardSearch: $('forward-search'),
+    forwardList: $('forward-list'),
+    forwardSelectedCount: $('forward-selected-count'),
+    forwardConfirmBtn: $('forward-confirm-btn'),
+
+    // Notification Prompt Dialog
+    notifPromptDialog: $('notif-prompt-dialog'),
+    notifPromptAllow: $('notif-prompt-allow'),
+    notifPromptDismiss: $('notif-prompt-dismiss'),
+
     toasts: $('toasts'),
   };
 
@@ -168,7 +194,12 @@
     selectedFile: null,
     replyTarget: null,
     typers: new Map(),
-    notificationsEnabled: Notification && Notification.permission === 'granted',
+    notificationsEnabled: typeof Notification !== 'undefined' && Notification.permission === 'granted',
+    selectionMode: false,
+    selectedMessageIds: new Set(),
+    selectedForwardTargets: new Set(),
+    selectedGroupFriends: new Set(),
+    messagesCache: new Map(),
   };
 
   let socket = null;
@@ -385,7 +416,9 @@
       const notif = new Notification(title, {
         body,
         icon: `${BASE}/static/favicon.svg`,
-        tag: `chatbox-${convId}`,
+        badge: `${BASE}/static/favicon.svg`,
+        tag: `chatbox-${convId || 'general'}`,
+        renotify: true,
       });
       notif.onclick = () => {
         window.focus();
@@ -397,6 +430,33 @@
     }
   }
 
+  function checkNotificationPrompt() {
+    if (!('Notification' in window)) return;
+    if (Notification.permission === 'default' && !sessionStorage.getItem('notif_prompt_dismissed')) {
+      setTimeout(() => {
+        if (el.notifPromptDialog && typeof el.notifPromptDialog.showModal === 'function' && !el.notifPromptDialog.open) {
+          el.notifPromptDialog.showModal();
+        }
+      }, 1000);
+    }
+  }
+
+  function requestBrowserNotificationPermission() {
+    if (!('Notification' in window)) {
+      toast('Notifications are not supported in this browser.');
+      return;
+    }
+    Notification.requestPermission().then((perm) => {
+      state.notificationsEnabled = perm === 'granted';
+      if (perm === 'granted') {
+        toast('Browser notifications enabled!');
+        sendBrowserNotification('Notifications Enabled', 'You will receive alerts for new messages.', null);
+      } else {
+        toast('Notification permission was not granted.');
+      }
+    });
+  }
+
   function toggleNotificationPermission() {
     if (!('Notification' in window)) {
       toast('Notifications are not supported in this browser.');
@@ -406,14 +466,29 @@
       toast('Notifications are already enabled.');
       return;
     }
-    Notification.requestPermission().then((perm) => {
-      state.notificationsEnabled = perm === 'granted';
-      if (perm === 'granted') {
-        toast('Browser notifications enabled!');
+    if (Notification.permission === 'default') {
+      if (el.notifPromptDialog && typeof el.notifPromptDialog.showModal === 'function') {
+        el.notifPromptDialog.showModal();
       } else {
-        toast('Notification permission was not granted.');
+        requestBrowserNotificationPermission();
       }
-    });
+      return;
+    }
+    toast('Notifications are blocked by your browser settings. Please enable them in your address bar.');
+  }
+
+  if (el.notifPromptDismiss) {
+    el.notifPromptDismiss.onclick = () => {
+      sessionStorage.setItem('notif_prompt_dismissed', '1');
+      el.notifPromptDialog.close();
+    };
+  }
+
+  if (el.notifPromptAllow) {
+    el.notifPromptAllow.onclick = () => {
+      el.notifPromptDialog.close();
+      requestBrowserNotificationPermission();
+    };
   }
 
   /* ------------------------------------------------------------- toast utility */
@@ -546,6 +621,7 @@
     loadFriends();
     loadFriendRequests();
     hideLoader();
+    checkNotificationPrompt();
 
     if (window.innerWidth <= 768 && !state.activeConversationId) {
       openRail();
@@ -686,10 +762,21 @@
         socket.emit('join_conversation', { conversationId: msg.conversationId });
       }
 
+      state.messagesCache.set(msg.id, msg);
+
       const isCurrent = state.activeConversationId === msg.conversationId;
       if (isCurrent) {
         appendMessage(msg);
         scrollToBottom();
+        // Active chat: notify server that user has seen this message
+        if (msg.senderId !== state.user.id && socket) {
+          socket.emit('conversation_seen', { conversationId: msg.conversationId });
+        }
+      } else {
+        // Chat not currently active: notify server that message was delivered to device
+        if (msg.senderId !== state.user.id && socket) {
+          socket.emit('message_delivered', { messageId: msg.id, conversationId: msg.conversationId });
+        }
       }
 
       const displayText = msg.mediaType === 'audio'
@@ -717,9 +804,26 @@
         playReceiveSound();
         const title = conv ? (conv.type === 'group' ? `${conv.name} (${msg.senderName})` : msg.senderName) : msg.senderName;
         const bodyText = displayText;
-        if (document.hidden || !isCurrent) {
+        if (document.hidden || !isCurrent || !document.hasFocus()) {
           sendBrowserNotification(title, bodyText, msg.conversationId);
         }
+      }
+    });
+
+    socket.on('message_status_update', ({ messageId, status, conversationId }) => {
+      const cached = state.messagesCache.get(messageId);
+      if (cached) cached.status = status;
+      const checkWrap = $(`msg-check-${messageId}`);
+      if (checkWrap) {
+        checkWrap.innerHTML = renderTickSvg(status);
+      }
+    });
+
+    socket.on('conversation_seen', ({ conversationId, seenBy }) => {
+      if (state.activeConversationId === conversationId) {
+        document.querySelectorAll('#messages .msg-row.own .msg-check-wrap').forEach((wrap) => {
+          wrap.innerHTML = renderTickSvg('seen');
+        });
       }
     });
 
@@ -935,6 +1039,7 @@
 
   async function switchConversation(convId) {
     state.activeConversationId = convId;
+    exitSelectionMode();
     closeRail();
     updateMenuButton();
     state.typers.clear();
@@ -965,11 +1070,12 @@
 
     el.input.disabled = false;
     el.send.disabled = false;
-    el.input.placeholder = `Message ${conv.name}…`;
+    el.input.placeholder = 'Type a message…';
 
-    // Join room on socket
+    // Join room on socket and mark conversation as seen
     if (socket) {
       socket.emit('join_conversation', { conversationId: convId });
+      socket.emit('conversation_seen', { conversationId: convId });
     }
 
     // Load message history
@@ -978,6 +1084,17 @@
       renderMessages(data.messages || []);
     } catch (err) {
       toast(err.message);
+    }
+  }
+
+  function renderTickSvg(status) {
+    const s = status || 'sent';
+    if (s === 'seen') {
+      return '<svg viewBox="0 0 20 16" class="tick-svg seen" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-label="Seen" title="Seen"><path d="M1 8.5L5 12.5L13.5 4"/><path d="M5.5 8.5L9.5 12.5L18 4"/></svg>';
+    } else if (s === 'delivered') {
+      return '<svg viewBox="0 0 20 16" class="tick-svg delivered" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-label="Delivered" title="Delivered"><path d="M1 8.5L5 12.5L13.5 4"/><path d="M5.5 8.5L9.5 12.5L18 4"/></svg>';
+    } else {
+      return '<svg viewBox="0 0 16 16" class="tick-svg sent" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-label="Sent" title="Sent"><path d="M2.5 8.5L6.5 12.5L14.5 4.5"/></svg>';
     }
   }
 
@@ -990,6 +1107,7 @@
     } else {
       el.emptyState.hidden = true;
       for (const msg of messages) {
+        state.messagesCache.set(msg.id, msg);
         appendMessage(msg);
       }
       scrollToBottom();
@@ -998,6 +1116,7 @@
 
   function appendMessage(msg) {
     el.emptyState.hidden = true;
+    state.messagesCache.set(msg.id, msg);
 
     const isOwn = msg.senderId === state.user.id;
     const isSystem = msg.senderName === 'System';
@@ -1005,6 +1124,10 @@
     const li = document.createElement('li');
     li.className = `msg-row ${isOwn ? 'own' : ''} ${isSystem ? 'system' : ''}`;
     li.id = `msg-${msg.id}`;
+
+    if (state.selectedMessageIds.has(msg.id)) {
+      li.classList.add('selected');
+    }
 
     if (isSystem) {
       const bubble = document.createElement('div');
@@ -1014,6 +1137,24 @@
       el.messages.appendChild(li);
       return;
     }
+
+    // Selection checkbox for selection mode
+    const selectCheck = document.createElement('div');
+    selectCheck.className = 'msg-select-check';
+    selectCheck.setAttribute('aria-label', 'Select message');
+    selectCheck.innerHTML = '<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>';
+    selectCheck.onclick = (e) => {
+      e.stopPropagation();
+      toggleMessageSelection(msg.id);
+    };
+    li.appendChild(selectCheck);
+
+    li.addEventListener('click', (e) => {
+      if (state.selectionMode) {
+        e.stopPropagation();
+        toggleMessageSelection(msg.id);
+      }
+    });
 
     // Avatar for other user
     if (!isOwn) {
@@ -1029,6 +1170,13 @@
     const bodyDiv = document.createElement('div');
     bodyDiv.className = 'msg-body';
 
+    // Swipe reply indicator icon behind bubble
+    const swipeIcon = document.createElement('div');
+    swipeIcon.className = 'swipe-reply-icon';
+    swipeIcon.setAttribute('aria-hidden', 'true');
+    swipeIcon.innerHTML = '<svg viewBox="0 0 24 24"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>';
+    bodyDiv.appendChild(swipeIcon);
+
     const meta = document.createElement('div');
     meta.className = 'msg-meta';
     
@@ -1037,12 +1185,11 @@
     meta.appendChild(timeSpan);
 
     if (isOwn) {
-      const checkSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      checkSvg.setAttribute('class', 'msg-check');
-      checkSvg.setAttribute('viewBox', '0 0 16 16');
-      checkSvg.setAttribute('aria-hidden', 'true');
-      checkSvg.innerHTML = '<path d="M12.3 4.3a1 1 0 0 0-1.4 0L6 9.2 4.1 7.3a1 1 0 1 0-1.4 1.4l2.6 2.6a1 1 0 0 0 1.4 0l5.6-5.6a1 1 0 0 0 0-1.4z"/>';
-      meta.appendChild(checkSvg);
+      const checkWrap = document.createElement('span');
+      checkWrap.className = 'msg-check-wrap';
+      checkWrap.id = `msg-check-${msg.id}`;
+      checkWrap.innerHTML = renderTickSvg(msg.status);
+      meta.appendChild(checkWrap);
     }
 
     const bubble = document.createElement('div');
@@ -1194,14 +1341,25 @@
       toggleMsgMenu(e);
     });
 
-    // Touchscreen Long-Press (420ms)
+    // Touchscreen: Swipe to reply & Long-Press (420ms)
     let touchTimer = null;
+    let touchStartX = 0;
+    let touchStartY = 0;
     let touchMoved = false;
+    let isSwiping = false;
+    let hasVibrated = false;
 
     bubble.addEventListener('touchstart', (e) => {
+      if (state.selectionMode) return;
       touchMoved = false;
+      isSwiping = false;
+      hasVibrated = false;
+      const touch = e.touches[0];
+      touchStartX = touch.clientX;
+      touchStartY = touch.clientY;
+
       touchTimer = setTimeout(() => {
-        if (!touchMoved) {
+        if (!touchMoved && !isSwiping) {
           if (navigator.vibrate) {
             try { navigator.vibrate(25); } catch {}
           }
@@ -1210,18 +1368,57 @@
       }, 420);
     }, { passive: true });
 
-    bubble.addEventListener('touchmove', () => {
-      touchMoved = true;
-      if (touchTimer) clearTimeout(touchTimer);
-    }, { passive: true });
+    bubble.addEventListener('touchmove', (e) => {
+      if (state.selectionMode) return;
+      const touch = e.touches[0];
+      const dx = touch.clientX - touchStartX;
+      const dy = touch.clientY - touchStartY;
 
-    bubble.addEventListener('touchend', () => {
-      if (touchTimer) clearTimeout(touchTimer);
-    });
+      if (!isSwiping) {
+        if (Math.abs(dy) > Math.abs(dx) || Math.abs(dy) > 10) {
+          touchMoved = true;
+          if (touchTimer) clearTimeout(touchTimer);
+          return;
+        }
+        if (dx > 12 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+          isSwiping = true;
+          touchMoved = true;
+          if (touchTimer) clearTimeout(touchTimer);
+        }
+      }
 
-    bubble.addEventListener('touchcancel', () => {
+      if (isSwiping) {
+        if (e.cancelable) e.preventDefault();
+        const pull = Math.min(Math.max(dx * 0.6, 0), 75);
+        bubble.style.transform = `translateX(${pull}px)`;
+        bubble.style.transition = 'none';
+
+        if (pull >= 45 && !hasVibrated) {
+          if (navigator.vibrate) try { navigator.vibrate(20); } catch {}
+          hasVibrated = true;
+          bubble.classList.add('swipe-reply-ready');
+        } else if (pull < 45 && hasVibrated) {
+          hasVibrated = false;
+          bubble.classList.remove('swipe-reply-ready');
+        }
+      }
+    }, { passive: false });
+
+    const finishTouch = () => {
       if (touchTimer) clearTimeout(touchTimer);
-    });
+      if (isSwiping) {
+        bubble.style.transition = 'transform 0.22s cubic-bezier(0.175, 0.885, 0.32, 1.275)';
+        bubble.style.transform = 'translateX(0px)';
+        bubble.classList.remove('swipe-reply-ready');
+        if (hasVibrated) {
+          startReply(msg);
+        }
+        isSwiping = false;
+      }
+    };
+
+    bubble.addEventListener('touchend', finishTouch);
+    bubble.addEventListener('touchcancel', finishTouch);
 
     // Option 1: Reply to message
     const replyItem = document.createElement('button');
@@ -1252,26 +1449,19 @@
         }
       };
       dropdown.appendChild(copyItem);
-
-      // Option 3: Select Text
-      const selectItem = document.createElement('button');
-      selectItem.type = 'button';
-      selectItem.className = 'msg-dropdown-item';
-      selectItem.innerHTML = '<svg viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg><span>Select text</span>';
-      selectItem.onclick = (e) => {
-        e.stopPropagation();
-        closeAllDropdowns();
-        if (textP) {
-          const sel = window.getSelection();
-          const range = document.createRange();
-          range.selectNodeContents(textP);
-          sel.removeAllRanges();
-          sel.addRange(range);
-          toast('Text selected');
-        }
-      };
-      dropdown.appendChild(selectItem);
     }
+
+    // Option 3: Select messages (Multi-select & Forward)
+    const selectItem = document.createElement('button');
+    selectItem.type = 'button';
+    selectItem.className = 'msg-dropdown-item';
+    selectItem.innerHTML = '<svg viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="4" cy="6" r="2"/><circle cx="4" cy="12" r="2"/><circle cx="4" cy="18" r="2"/></svg><span>Select messages</span>';
+    selectItem.onclick = (e) => {
+      e.stopPropagation();
+      closeAllDropdowns();
+      enterSelectionMode(msg.id);
+    };
+    dropdown.appendChild(selectItem);
 
     // Option 4: Download Media (if media present)
     if (mediaUrl) {
@@ -1367,27 +1557,31 @@
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
 
-  /* ------------------------------------------------------------- media upload */
-  el.attachBtn.onclick = () => el.mediaInput.click();
-
-  el.mediaInput.onchange = () => {
-    const file = el.mediaInput.files && el.mediaInput.files[0];
+  /* ------------------------------------------------------------- media upload & drag-drop */
+  function handleMediaFile(file) {
     if (!file) return;
-
     state.selectedFile = file;
-    el.mediaName.textContent = file.name;
+    el.mediaName.textContent = file.name || (file.type.startsWith('image/') ? 'Pasted Image' : 'Media file');
     el.mediaSize.textContent = `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
 
     if (file.type.startsWith('image/')) {
       const url = URL.createObjectURL(file);
       el.mediaThumb.style.backgroundImage = `url(${url})`;
+      el.mediaThumb.textContent = '';
     } else {
       el.mediaThumb.style.backgroundImage = 'none';
-      el.mediaThumb.textContent = '🎥';
+      el.mediaThumb.textContent = file.type.startsWith('video/') ? '🎥' : (file.type.startsWith('audio/') ? '🎵' : '📁');
     }
 
     el.mediaPreviewBar.hidden = false;
     el.input.focus();
+  }
+
+  el.attachBtn.onclick = () => el.mediaInput.click();
+
+  el.mediaInput.onchange = () => {
+    const file = el.mediaInput.files && el.mediaInput.files[0];
+    if (file) handleMediaFile(file);
   };
 
   el.mediaCancel.onclick = clearMediaSelection;
@@ -1396,6 +1590,274 @@
     state.selectedFile = null;
     el.mediaInput.value = '';
     el.mediaPreviewBar.hidden = true;
+  }
+
+  // Clipboard Paste Support (Requirement 7)
+  el.input.addEventListener('paste', (e) => {
+    const items = (e.clipboardData || window.clipboardData)?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.kind === 'file' || item.type.startsWith('image/') || item.type.startsWith('video/') || item.type.startsWith('audio/')) {
+        const file = item.getAsFile();
+        if (file) {
+          e.preventDefault();
+          handleMediaFile(file);
+          return;
+        }
+      }
+    }
+    // Text paste continues normally as default
+  });
+
+  // Desktop Drag & Drop Support (Requirement 6)
+  let dragCounter = 0;
+  window.addEventListener('dragenter', (e) => {
+    if (!e.dataTransfer || !e.dataTransfer.types) return;
+    const isFiles = Array.from(e.dataTransfer.types).includes('Files');
+    if (!isFiles) return;
+    dragCounter++;
+    if (state.activeConversationId && el.dragDropOverlay) {
+      el.dragDropOverlay.hidden = false;
+    }
+  });
+
+  window.addEventListener('dragleave', (e) => {
+    dragCounter--;
+    if (dragCounter <= 0) {
+      dragCounter = 0;
+      if (el.dragDropOverlay) el.dragDropOverlay.hidden = true;
+    }
+  });
+
+  window.addEventListener('dragover', (e) => {
+    if (!e.dataTransfer || !e.dataTransfer.types) return;
+    const isFiles = Array.from(e.dataTransfer.types).includes('Files');
+    if (!isFiles) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  });
+
+  window.addEventListener('drop', (e) => {
+    dragCounter = 0;
+    if (el.dragDropOverlay) el.dragDropOverlay.hidden = true;
+    if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+    e.preventDefault();
+    if (!state.activeConversationId) {
+      toast('Open a conversation to send media');
+      return;
+    }
+    const file = e.dataTransfer.files[0];
+    handleMediaFile(file);
+  });
+
+  /* ------------------------------------------------------------- message selection & forward */
+  function enterSelectionMode(initialMsgId) {
+    state.selectionMode = true;
+    state.selectedMessageIds.clear();
+    if (initialMsgId) state.selectedMessageIds.add(initialMsgId);
+    el.messages.classList.add('selection-mode');
+    if (el.selectionBar) el.selectionBar.hidden = false;
+    if (el.composer) el.composer.hidden = true;
+    updateSelectionUi();
+  }
+
+  function exitSelectionMode() {
+    state.selectionMode = false;
+    state.selectedMessageIds.clear();
+    el.messages.classList.remove('selection-mode');
+    if (el.selectionBar) el.selectionBar.hidden = true;
+    if (el.composer) el.composer.hidden = false;
+    updateSelectionUi();
+  }
+
+  function toggleMessageSelection(msgId) {
+    if (!state.selectionMode) return;
+    if (state.selectedMessageIds.has(msgId)) {
+      state.selectedMessageIds.delete(msgId);
+    } else {
+      state.selectedMessageIds.add(msgId);
+    }
+    if (state.selectedMessageIds.size === 0) {
+      exitSelectionMode();
+      return;
+    }
+    updateSelectionUi();
+  }
+
+  function updateSelectionUi() {
+    const totalSelected = state.selectedMessageIds.size;
+    if (el.selectionCount) {
+      el.selectionCount.textContent = `${totalSelected} selected`;
+    }
+    if (el.selectionForwardBtn) {
+      el.selectionForwardBtn.disabled = totalSelected === 0;
+    }
+    document.querySelectorAll('#messages .msg-row').forEach((row) => {
+      const id = Number(row.id.replace('msg-', ''));
+      if (state.selectedMessageIds.has(id)) {
+        row.classList.add('selected');
+      } else {
+        row.classList.remove('selected');
+      }
+    });
+  }
+
+  if (el.selectionCloseBtn) {
+    el.selectionCloseBtn.onclick = exitSelectionMode;
+  }
+
+  if (el.selectionForwardBtn) {
+    el.selectionForwardBtn.onclick = openForwardDialog;
+  }
+
+  function openForwardDialog() {
+    state.selectedForwardTargets.clear();
+    if (el.forwardSearch) el.forwardSearch.value = '';
+    renderForwardList();
+    if (el.forwardSelectedCount) el.forwardSelectedCount.textContent = '0 selected';
+    if (el.forwardConfirmBtn) el.forwardConfirmBtn.disabled = true;
+    if (el.forwardDialog) el.forwardDialog.showModal();
+  }
+
+  function renderForwardList(query = '') {
+    if (!el.forwardList) return;
+    el.forwardList.replaceChildren();
+    const q = (query || '').toLowerCase().trim();
+
+    const destinations = [];
+    // Existing conversations
+    for (const c of state.conversations) {
+      destinations.push({
+        targetKey: `c:${c.id}`,
+        name: c.name,
+        sub: c.type === 'group' ? `${c.memberCount || 2} members` : (c.phone || 'Direct Chat'),
+        type: c.type,
+        avatarColor: c.avatarColor,
+        avatarUrl: c.avatarUrl,
+        convId: c.id,
+      });
+    }
+    // Friends who aren't already represented as direct conversations
+    for (const f of state.friends) {
+      const alreadyConv = state.conversations.find((c) => c.type === 'direct' && c.phone === f.phone);
+      if (!alreadyConv) {
+        destinations.push({
+          targetKey: `f:${f.phone}`,
+          name: f.name,
+          sub: f.phone,
+          type: 'friend',
+          avatarColor: f.avatarColor,
+          avatarUrl: f.avatarUrl,
+          friendPhone: f.phone,
+        });
+      }
+    }
+
+    const filtered = destinations.filter((d) => {
+      return !q || d.name.toLowerCase().includes(q) || (d.sub && d.sub.toLowerCase().includes(q));
+    });
+
+    if (!filtered.length) {
+      const empty = document.createElement('div');
+      empty.className = 'picker-empty';
+      empty.textContent = q ? `No chats or friends match "${query}"` : 'No available chats or friends';
+      el.forwardList.appendChild(empty);
+      return;
+    }
+
+    filtered.forEach((d) => {
+      const label = document.createElement('label');
+      label.className = 'forward-target-item';
+      
+      const check = document.createElement('input');
+      check.type = 'checkbox';
+      check.className = 'forward-target-check';
+      check.checked = state.selectedForwardTargets.has(d.targetKey);
+      check.onchange = () => {
+        if (check.checked) {
+          state.selectedForwardTargets.add(d.targetKey);
+        } else {
+          state.selectedForwardTargets.delete(d.targetKey);
+        }
+        const count = state.selectedForwardTargets.size;
+        if (el.forwardSelectedCount) el.forwardSelectedCount.textContent = `${count} selected`;
+        if (el.forwardConfirmBtn) el.forwardConfirmBtn.disabled = count === 0;
+      };
+
+      const avatar = document.createElement('span');
+      avatar.className = 'avatar small';
+      renderAvatar(avatar, d.name, d.avatarColor || 0, d.avatarUrl || null);
+
+      const info = document.createElement('div');
+      info.className = 'forward-target-info';
+      const name = document.createElement('span');
+      name.className = 'forward-target-name';
+      name.textContent = d.name;
+      const sub = document.createElement('span');
+      sub.className = 'forward-target-sub';
+      sub.textContent = d.sub;
+      info.append(name, sub);
+
+      label.append(check, avatar, info);
+      el.forwardList.appendChild(label);
+    });
+  }
+
+  if (el.forwardSearch) {
+    el.forwardSearch.oninput = () => renderForwardList(el.forwardSearch.value);
+  }
+
+  if (el.forwardConfirmBtn) {
+    el.forwardConfirmBtn.onclick = confirmForward;
+  }
+
+  async function confirmForward() {
+    if (!state.selectedForwardTargets.size || !state.selectedMessageIds.size) return;
+    if (el.forwardConfirmBtn) el.forwardConfirmBtn.disabled = true;
+
+    const msgs = Array.from(state.selectedMessageIds)
+      .map((id) => state.messagesCache.get(id))
+      .filter(Boolean)
+      .sort((a, b) => (a.ts || a.id) - (b.ts || b.id));
+
+    toast(`Forwarding ${msgs.length} message${msgs.length > 1 ? 's' : ''}…`);
+
+    for (const targetKey of state.selectedForwardTargets) {
+      let targetConvId = null;
+      if (targetKey.startsWith('c:')) {
+        targetConvId = Number(targetKey.slice(2));
+      } else if (targetKey.startsWith('f:')) {
+        const phone = targetKey.slice(2);
+        try {
+          const res = await api('/api/conversations/direct', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ phone }),
+          });
+          if (res && res.conversation) targetConvId = res.conversation.id;
+        } catch (e) {
+          continue;
+        }
+      }
+
+      if (targetConvId && socket) {
+        for (const m of msgs) {
+          socket.emit('message', {
+            conversationId: targetConvId,
+            text: m.text || '',
+            mediaUrl: m.mediaUrl || null,
+            mediaType: m.mediaType || null,
+            mediaName: m.mediaName || null,
+          });
+        }
+      }
+    }
+
+    if (el.forwardDialog) el.forwardDialog.close();
+    exitSelectionMode();
+    toast('Messages forwarded successfully');
+    loadConversations();
   }
 
   /* ------------------------------------------------------------- reply feature */
@@ -1981,9 +2443,82 @@
     el.panelChats.hidden = true;
   };
 
+  /* ------------------------------------------------------------- group friends picker */
+  function renderGroupFriendsPicker(filterText = '') {
+    if (!el.groupFriendsList) return;
+    el.groupFriendsList.replaceChildren();
+    const q = (filterText || '').toLowerCase().trim();
+
+    if (!state.friends || !state.friends.length) {
+      const empty = document.createElement('div');
+      empty.className = 'picker-empty';
+      empty.textContent = 'You have no friends yet. Add friends first to create a group.';
+      el.groupFriendsList.appendChild(empty);
+      return;
+    }
+
+    const filtered = state.friends.filter((f) => {
+      return !q || f.name.toLowerCase().includes(q) || f.phone.includes(q);
+    });
+
+    if (!filtered.length) {
+      const empty = document.createElement('div');
+      empty.className = 'picker-empty';
+      empty.textContent = `No friends match "${escapeHtml(filterText)}"`;
+      el.groupFriendsList.appendChild(empty);
+      return;
+    }
+
+    filtered.forEach((friend) => {
+      const label = document.createElement('label');
+      label.className = 'group-friend-row';
+
+      const check = document.createElement('input');
+      check.type = 'checkbox';
+      check.className = 'group-friend-check';
+      check.value = friend.phone;
+      check.checked = state.selectedGroupFriends.has(friend.phone);
+
+      check.onchange = () => {
+        if (check.checked) {
+          state.selectedGroupFriends.add(friend.phone);
+        } else {
+          state.selectedGroupFriends.delete(friend.phone);
+        }
+        if (el.groupFriendsCount) {
+          el.groupFriendsCount.textContent = `${state.selectedGroupFriends.size} selected`;
+        }
+      };
+
+      const avatar = document.createElement('span');
+      avatar.className = 'avatar small';
+      renderAvatar(avatar, friend.name, friend.avatarColor, friend.avatarUrl);
+
+      const info = document.createElement('div');
+      info.className = 'group-friend-info';
+      const name = document.createElement('span');
+      name.className = 'group-friend-name';
+      name.textContent = friend.name;
+      const phone = document.createElement('span');
+      phone.className = 'group-friend-phone';
+      phone.textContent = friend.phone;
+      info.append(name, phone);
+
+      label.append(check, avatar, info);
+      el.groupFriendsList.appendChild(label);
+    });
+  }
+
+  if (el.groupFriendsSearch) {
+    el.groupFriendsSearch.oninput = () => renderGroupFriendsPicker(el.groupFriendsSearch.value);
+  }
+
   el.newChatBtn.onclick = () => {
     el.dmError.textContent = '';
     el.groupError.textContent = '';
+    if (el.tabNewGroup.classList.contains('active')) {
+      renderGroupFriendsPicker(el.groupFriendsSearch ? el.groupFriendsSearch.value : '');
+    }
     el.newChatDialog.showModal();
   };
 
@@ -1999,6 +2534,10 @@
     el.tabNewDm.classList.remove('active');
     el.groupForm.hidden = false;
     el.dmForm.hidden = true;
+    state.selectedGroupFriends.clear();
+    if (el.groupFriendsCount) el.groupFriendsCount.textContent = '0 selected';
+    if (el.groupFriendsSearch) el.groupFriendsSearch.value = '';
+    renderGroupFriendsPicker();
   };
 
   el.dmForm.onsubmit = async (e) => {
@@ -2043,10 +2582,16 @@
     el.groupError.textContent = '';
     try {
       const name = el.groupName.value.trim();
-      const phones = el.groupMembers.value
-        .split(',')
-        .map((p) => p.trim())
-        .filter(Boolean);
+      const phones = Array.from(state.selectedGroupFriends);
+
+      if (!name) {
+        el.groupError.textContent = 'Please enter a group name';
+        return;
+      }
+      if (!phones.length) {
+        el.groupError.textContent = 'Please select at least one friend to add to the group.';
+        return;
+      }
 
       const data = await api('/api/conversations/group', {
         method: 'POST',
@@ -2055,7 +2600,8 @@
       });
 
       el.groupName.value = '';
-      el.groupMembers.value = '';
+      state.selectedGroupFriends.clear();
+      if (el.groupFriendsCount) el.groupFriendsCount.textContent = '0 selected';
       el.newChatDialog.close();
       await loadConversations();
       switchConversation(data.conversation.id);
