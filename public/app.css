@@ -1283,9 +1283,9 @@ button:active {
 
 .swipe-reply-icon {
   position: absolute;
-  left: 6px;
-  top: calc(50% + 10px);
-  transform: translateY(-50%) scale(0.85);
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%) scale(0.6);
   width: 28px;
   height: 28px;
   border-radius: 50%;
@@ -1294,7 +1294,8 @@ button:active {
   display: flex;
   align-items: center;
   justify-content: center;
-  opacity: 0.6;
+  opacity: 0;
+  visibility: hidden;
   pointer-events: none;
   z-index: 0;
   transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease, transform 0.15s ease;
@@ -1308,20 +1309,20 @@ button:active {
   stroke-width: 2.2;
 }
 
-.msg-body:has(.swipe-reply-ready) .swipe-reply-icon,
-.msg-row:has(.swipe-reply-ready) .swipe-reply-icon {
-  opacity: 1;
-  background: var(--accent);
-  color: #fff;
-  transform: translateY(-50%) scale(1.15);
+.swipe-reply-icon.ready {
+  background: var(--accent) !important;
+  color: #fff !important;
+  transform: translateY(-50%) scale(1.18) !important;
+  box-shadow: 0 0 14px var(--accent-glow);
 }
 
 .bubble {
+  position: relative;
+  z-index: 1;
   padding: 0.75rem 1.05rem;
   border-radius: 18px 18px 18px 4px;
   font-size: 0.93rem;
   line-height: 1.48;
-  position: relative;
   word-break: break-word;
   background: var(--bubble-other);
   color: var(--bubble-other-ink);
@@ -2751,43 +2752,72 @@ dialog[open] .dialog-card {
   font-size: 0.72rem;
 }
 
-/* Lightbox Modal */
-.lightbox-dialog {
-  max-width: 90vw;
-  max-height: 90vh;
+/* Lightbox Modal (Fullscreen) */
+dialog.lightbox-dialog {
+  max-width: 100vw !important;
+  max-height: 100vh !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  overflow: hidden !important;
+}
+
+dialog.lightbox-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.93) !important;
+  backdrop-filter: blur(16px) !important;
 }
 
 .lightbox-content {
-  position: relative;
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 2rem;
+  box-sizing: border-box;
 }
 
 .lightbox-content img {
-  max-width: 85vw;
-  max-height: 85vh;
-  border-radius: 14px;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.65);
+  max-width: calc(100vw - 3rem);
+  max-height: calc(100vh - 3rem);
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.85);
+  animation: modalPop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
 }
 
 .lightbox-close {
-  position: absolute;
-  top: -16px;
-  right: -16px;
-  background: #ffffff;
-  color: #0f172a;
-  width: 36px;
-  height: 36px;
+  position: fixed;
+  top: 1.5rem;
+  right: 1.5rem;
+  background: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
-  font-weight: bold;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  font-size: 1.25rem;
+  font-weight: 700;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  z-index: 100;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  transition: transform 0.15s ease, background 0.15s ease;
 }
 
 .lightbox-close:hover {
+  background: rgba(255, 255, 255, 0.3);
   transform: scale(1.1);
 }
 
@@ -4010,48 +4040,69 @@ dialog[open] .dialog-card {
 
 .notif-prompt-graphic {
   position: relative;
-  width: 72px;
-  height: 72px;
+  width: 52px;
+  height: 52px;
   border-radius: 50%;
   background: rgba(56, 189, 248, 0.12);
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 1.25rem;
+  margin-bottom: 0.95rem;
 }
 
 .notif-prompt-glow {
   position: absolute;
-  inset: -6px;
+  inset: -4px;
   border-radius: 50%;
   background: radial-gradient(circle, rgba(56, 189, 248, 0.25) 0%, transparent 70%);
 }
 
 .notif-prompt-icon {
-  width: 34px;
-  height: 34px;
+  width: 24px;
+  height: 24px;
   stroke: var(--accent);
   position: relative;
   z-index: 1;
 }
 
 .notif-prompt-title {
-  font-size: 1.3rem;
+  font-size: 1.25rem;
   font-weight: 700;
   color: var(--ink);
-  margin-bottom: 0.6rem;
+  margin-bottom: 0.5rem;
 }
 
 .notif-prompt-desc {
-  font-size: 0.88rem;
+  font-size: 0.86rem;
   line-height: 1.5;
   color: var(--muted);
-  margin-bottom: 1.6rem;
+  margin-bottom: 1.4rem;
 }
 
 .notif-prompt-actions {
   display: flex;
-  gap: 0.75rem;
+  flex-direction: column;
+  gap: 0.55rem;
+  width: 100%;
+}
+
+.notif-prompt-btn-primary {
   width: 100%;
   justify-content: center;
+  padding: 0.75rem 1rem;
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.notif-prompt-btn-secondary {
+  width: 100%;
+  justify-content: center;
+  padding: 0.5rem 1rem;
+  font-size: 0.86rem;
+  color: var(--muted);
+}
+
+.notif-prompt-btn-secondary:hover {
+  color: var(--ink);
+  background: var(--surface-2);
 }

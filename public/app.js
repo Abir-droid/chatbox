@@ -1393,13 +1393,24 @@
         bubble.style.transform = `translateX(${pull}px)`;
         bubble.style.transition = 'none';
 
+        if (pull > 6) {
+          swipeIcon.style.opacity = Math.min(pull / 30, 1).toString();
+          swipeIcon.style.visibility = 'visible';
+          swipeIcon.style.transform = `translateY(-50%) scale(${0.65 + (pull / 45) * 0.4})`;
+        } else {
+          swipeIcon.style.opacity = '0';
+          swipeIcon.style.visibility = 'hidden';
+        }
+
         if (pull >= 45 && !hasVibrated) {
           if (navigator.vibrate) try { navigator.vibrate(20); } catch {}
           hasVibrated = true;
           bubble.classList.add('swipe-reply-ready');
+          swipeIcon.classList.add('ready');
         } else if (pull < 45 && hasVibrated) {
           hasVibrated = false;
           bubble.classList.remove('swipe-reply-ready');
+          swipeIcon.classList.remove('ready');
         }
       }
     }, { passive: false });
@@ -1410,6 +1421,11 @@
         bubble.style.transition = 'transform 0.22s cubic-bezier(0.175, 0.885, 0.32, 1.275)';
         bubble.style.transform = 'translateX(0px)';
         bubble.classList.remove('swipe-reply-ready');
+        swipeIcon.classList.remove('ready');
+        swipeIcon.style.transition = 'opacity 0.18s ease, transform 0.18s ease';
+        swipeIcon.style.opacity = '0';
+        swipeIcon.style.visibility = 'hidden';
+        swipeIcon.style.transform = 'translateY(-50%) scale(0.6)';
         if (hasVibrated) {
           startReply(msg);
         }
@@ -1902,6 +1918,12 @@
   }
 
   el.lightboxClose.onclick = () => el.lightboxDialog.close();
+
+  el.lightboxDialog.onclick = (e) => {
+    if (e.target !== el.lightboxImg) {
+      el.lightboxDialog.close();
+    }
+  };
 
   /* ------------------------------------------------------------- sending */
   el.composer.onsubmit = async (e) => {
