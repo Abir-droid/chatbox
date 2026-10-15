@@ -1051,6 +1051,7 @@ button:active {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
   background: var(--bg);
   position: relative;
   overflow: hidden;
@@ -1199,7 +1200,8 @@ button:active {
 
 /* Messages Log */
 .log {
-  flex: 1;
+  flex: 1 1 0px;
+  min-height: 0;
   overflow-y: auto;
   padding: 1.5rem 1.75rem;
   display: flex;
@@ -2149,6 +2151,7 @@ button:active {
 /* Reply Preview Bar */
 .reply-preview-bar {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 0.85rem;
   padding: 0.6rem 1.6rem;
@@ -2228,6 +2231,7 @@ button:active {
 /* Media Preview Bar */
 .media-preview-bar {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 0.85rem;
   padding: 0.65rem 1.6rem;
@@ -2363,6 +2367,7 @@ button:active {
 
 /* Composer Bar */
 .composer {
+  flex-shrink: 0;
   padding: 0.85rem 1.6rem 1rem;
   background: var(--surface);
   border-top: 1px solid var(--line);
@@ -2371,6 +2376,7 @@ button:active {
   gap: 0.6rem;
   position: relative;
   box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.02);
+  z-index: 20;
 }
 
 .composer-btn {
@@ -3630,6 +3636,7 @@ dialog.lightbox-dialog::backdrop {
   .thread {
     height: 100%;
     height: 100dvh;
+    min-height: 0;
     width: 100%;
   }
 
@@ -4473,9 +4480,10 @@ dialog.lightbox-dialog::backdrop {
   bottom: 0;
   width: 380px;
   max-width: 100vw;
-  background: var(--bg-surface-elevated, #17212b);
-  border-left: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
-  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.35);
+  background: var(--rail-bg);
+  color: var(--rail-ink);
+  border-left: 1px solid var(--rail-line);
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.45);
   z-index: 105;
   display: flex;
   flex-direction: column;
@@ -4494,6 +4502,7 @@ dialog.lightbox-dialog::backdrop {
   flex-direction: column;
   overflow: hidden;
   height: 100%;
+  background: var(--rail-bg);
 }
 
 .info-panel-head {
@@ -4502,39 +4511,42 @@ dialog.lightbox-dialog::backdrop {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 1rem;
-  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
-  background: inherit;
+  padding: 0 1.25rem;
+  border-bottom: 1px solid var(--rail-line);
+  background: var(--rail-bg);
 }
 
 .info-panel-head-title {
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--ink, #ffffff);
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--rail-ink);
 }
 
 .info-panel-close-btn {
   width: 36px;
   height: 36px;
-  border-radius: 50%;
+  border-radius: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
-  color: var(--muted, #8e9bb0);
-  border: none;
+  background: var(--rail-surface);
+  color: var(--rail-muted);
+  border: 1px solid var(--rail-line);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.18s ease;
 }
 
 .info-panel-close-btn:hover {
-  background: var(--surface-2, rgba(255, 255, 255, 0.08));
-  color: var(--ink, #ffffff);
+  background: var(--rail-hover);
+  color: var(--rail-ink);
 }
 
 .info-panel-close-btn svg {
   width: 18px;
   height: 18px;
+  stroke: currentColor;
 }
 
 .info-panel-scroll {
@@ -4546,7 +4558,7 @@ dialog.lightbox-dialog::backdrop {
 
 /* Profile Card */
 .info-profile-card {
-  padding: 1.5rem 1rem 1rem;
+  padding: 1.5rem 1.25rem 1rem;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -4555,7 +4567,7 @@ dialog.lightbox-dialog::backdrop {
 
 .info-avatar-wrap {
   position: relative;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.85rem;
 }
 
 .info-avatar-wrap .avatar.large {
@@ -4563,7 +4575,8 @@ dialog.lightbox-dialog::backdrop {
   height: 92px;
   font-size: 2.2rem;
   border-radius: 50%;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  border: 2px solid var(--rail-line);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4571,50 +4584,54 @@ dialog.lightbox-dialog::backdrop {
 }
 
 .info-name {
-  font-size: 1.22rem;
+  font-family: var(--font-display);
+  font-size: 1.25rem;
   font-weight: 700;
-  color: var(--ink, #ffffff);
-  margin: 0 0 0.2rem;
+  letter-spacing: -0.01em;
+  color: var(--rail-ink);
+  margin: 0 0 0.25rem;
 }
 
 .info-status {
-  font-size: 0.84rem;
-  color: var(--muted, #8e9bb0);
+  font-size: 0.85rem;
+  color: var(--rail-muted);
   margin: 0;
 }
 
 .info-status.online {
   color: #38bdf8;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 /* Quick Actions (Message, Mute, Search, More) */
 .info-quick-actions {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-  padding: 0.75rem 1rem 1.25rem;
+  gap: 10px;
+  padding: 0.75rem 1.25rem 1.25rem;
 }
 
 .info-action-tile {
-  background: var(--surface-2, rgba(255, 255, 255, 0.06));
-  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.05));
-  border-radius: 10px;
-  padding: 10px 4px 8px;
+  background: var(--rail-surface);
+  border: 1px solid var(--rail-line);
+  border-radius: 12px;
+  padding: 12px 6px 10px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  font-size: 0.76rem;
-  font-weight: 500;
-  color: var(--ink, #ffffff);
+  gap: 7px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--rail-ink);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.18s ease;
 }
 
 .info-action-tile:hover {
-  background: var(--surface-3, rgba(255, 255, 255, 0.12));
-  transform: translateY(-1px);
+  background: var(--rail-hover);
+  border-color: rgba(56, 189, 248, 0.3);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
 }
 
 .info-tile-icon {
@@ -4623,7 +4640,7 @@ dialog.lightbox-dialog::backdrop {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--accent, #38bdf8);
+  color: #38bdf8;
 }
 
 .info-tile-icon svg {
@@ -4633,28 +4650,28 @@ dialog.lightbox-dialog::backdrop {
 
 /* Info Sections */
 .info-section {
-  border-top: 8px solid var(--surface-1, rgba(0, 0, 0, 0.25));
+  border-top: 1px solid var(--rail-line);
   padding: 0.5rem 0;
 }
 
 .info-detail-item {
-  padding: 0.65rem 1.25rem;
+  padding: 0.75rem 1.25rem;
 }
 
 .info-detail-main {
-  font-size: 0.95rem;
+  font-size: 0.96rem;
   font-weight: 600;
-  color: var(--ink, #ffffff);
+  color: var(--rail-ink);
   margin-bottom: 2px;
   user-select: text;
 }
 
 .info-detail-sub {
-  font-size: 0.75rem;
-  color: var(--muted, #8e9bb0);
+  font-size: 0.76rem;
+  color: var(--rail-muted);
 }
 
-/* Media Rows */
+/* Media Rows & Action Rows */
 .info-media-row,
 .info-action-row {
   display: flex;
@@ -4664,8 +4681,9 @@ dialog.lightbox-dialog::backdrop {
   padding: 0.85rem 1.25rem;
   background: transparent;
   border: none;
-  color: var(--ink, #ffffff);
+  color: var(--rail-ink);
   font-size: 0.92rem;
+  font-weight: 500;
   text-align: left;
   cursor: pointer;
   transition: background 0.15s ease;
@@ -4673,7 +4691,7 @@ dialog.lightbox-dialog::backdrop {
 
 .info-media-row:hover,
 .info-action-row:hover {
-  background: var(--surface-2, rgba(255, 255, 255, 0.05));
+  background: var(--rail-hover);
 }
 
 .info-row-icon {
@@ -4682,7 +4700,7 @@ dialog.lightbox-dialog::backdrop {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--muted, #8e9bb0);
+  color: var(--rail-muted);
   flex-shrink: 0;
 }
 
@@ -4700,7 +4718,7 @@ dialog.lightbox-dialog::backdrop {
 .info-chevron {
   width: 16px;
   height: 16px;
-  stroke: var(--muted, #8e9bb0);
+  stroke: var(--rail-muted);
   fill: none;
   stroke-width: 2;
   margin-left: auto;
@@ -4708,67 +4726,79 @@ dialog.lightbox-dialog::backdrop {
 }
 
 .info-action-row.danger {
-  color: #ef4444;
+  color: #f87171;
 }
 
 .info-action-row.danger .info-row-icon {
-  color: #ef4444;
+  color: #f87171;
 }
 
-/* ------------------------------------------------------------- Shared Media Browser (Screenshot 202037) */
+.info-action-row.danger:hover {
+  background: rgba(239, 68, 68, 0.12);
+}
+
+/* ------------------------------------------------------------- Shared Media Browser */
 .media-browser-head {
   justify-content: flex-start;
   gap: 12px;
+  background: var(--rail-bg);
+  border-bottom: 1px solid var(--rail-line);
 }
 
 .info-media-back-btn {
   width: 36px;
   height: 36px;
-  border-radius: 50%;
+  border-radius: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
-  color: var(--ink, #ffffff);
-  border: none;
+  background: var(--rail-surface);
+  color: var(--rail-muted);
+  border: 1px solid var(--rail-line);
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: all 0.18s ease;
 }
 
 .info-media-back-btn:hover {
-  background: var(--surface-2, rgba(255, 255, 255, 0.08));
+  background: var(--rail-hover);
+  color: var(--rail-ink);
 }
 
 .info-media-back-btn svg {
   width: 20px;
   height: 20px;
+  stroke: currentColor;
 }
 
 .info-media-head-title {
+  font-family: var(--font-display);
   font-size: 1.1rem;
   font-weight: 700;
-  color: var(--ink, #ffffff);
+  letter-spacing: -0.01em;
+  color: var(--rail-ink);
   flex: 1;
 }
 
 .info-media-head-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 
 .info-media-content {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 0.5rem 0.75rem 2rem;
+  padding: 0.75rem 1rem 2rem;
   scrollbar-width: thin;
+  background: var(--rail-bg);
+  color: var(--rail-ink);
 }
 
 .media-browser-section-title {
   font-size: 0.82rem;
   font-weight: 700;
-  color: var(--muted, #8e9bb0);
+  color: var(--rail-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   padding: 0.6rem 0.35rem 0.4rem;
@@ -4777,15 +4807,16 @@ dialog.lightbox-dialog::backdrop {
 .media-browser-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 4px;
+  gap: 6px;
 }
 
 .media-browser-thumb {
   position: relative;
   aspect-ratio: 1 / 1;
-  border-radius: 4px;
+  border-radius: 8px;
   overflow: hidden;
-  background: #000;
+  background: var(--rail-surface);
+  border: 1px solid var(--rail-line);
   cursor: pointer;
 }
 
@@ -4809,7 +4840,7 @@ dialog.lightbox-dialog::backdrop {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.32);
+  background: rgba(0, 0, 0, 0.35);
   color: #ffffff;
 }
 
@@ -4824,22 +4855,25 @@ dialog.lightbox-dialog::backdrop {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0.65rem 0.75rem;
-  border-radius: 8px;
-  background: var(--surface-2, rgba(255, 255, 255, 0.04));
-  margin-bottom: 6px;
+  padding: 0.75rem 0.85rem;
+  border-radius: 10px;
+  background: var(--rail-surface);
+  border: 1px solid var(--rail-line);
+  margin-bottom: 8px;
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: all 0.18s ease;
 }
 
 .media-file-item:hover {
-  background: var(--surface-3, rgba(255, 255, 255, 0.09));
+  background: var(--rail-hover);
+  border-color: rgba(56, 189, 248, 0.3);
+  transform: translateY(-1px);
 }
 
 .media-file-icon {
   width: 38px;
   height: 38px;
-  border-radius: 8px;
+  border-radius: 9px;
   background: rgba(56, 189, 248, 0.15);
   color: #38bdf8;
   display: flex;
@@ -4861,7 +4895,7 @@ dialog.lightbox-dialog::backdrop {
 .media-file-name {
   font-size: 0.88rem;
   font-weight: 600;
-  color: var(--ink, #ffffff);
+  color: var(--rail-ink);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4869,14 +4903,14 @@ dialog.lightbox-dialog::backdrop {
 
 .media-file-meta {
   font-size: 0.74rem;
-  color: var(--muted, #8e9bb0);
+  color: var(--rail-muted);
   margin-top: 2px;
 }
 
 .media-empty-notice {
   text-align: center;
   padding: 3rem 1rem;
-  color: var(--muted, #8e9bb0);
+  color: var(--rail-muted);
   font-size: 0.9rem;
 }
 

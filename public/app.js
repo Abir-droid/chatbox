@@ -1566,7 +1566,7 @@
         itemEl.onclick = (e) => {
           e.stopPropagation();
           if (!isUploading) {
-            openLightbox(item, rawMediaList);
+            openLightbox(item);
           }
         };
 
@@ -1633,7 +1633,7 @@
         img.alt = singleItem.mediaName || 'Photo';
         img.loading = 'lazy';
         img.onclick = () => {
-          if (!isUploading) openLightbox(singleItem, [singleItem]);
+          if (!isUploading) openLightbox(singleItem);
         };
         mediaDiv.appendChild(img);
       }
@@ -1826,7 +1826,21 @@
     };
     dropdown.appendChild(replyItem);
 
-    // Option 2: Copy Text
+    // Option 2: Forward message
+    const forwardItem = document.createElement('button');
+    forwardItem.type = 'button';
+    forwardItem.className = 'msg-dropdown-item';
+    forwardItem.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 17 20 12 15 7"/><path d="M4 18v-2a4 4 0 0 1 4-4h12"/></svg><span>Forward</span>';
+    forwardItem.onclick = (e) => {
+      e.stopPropagation();
+      closeAllDropdowns();
+      state.selectedMessageIds.clear();
+      state.selectedMessageIds.add(msg.id);
+      openForwardDialog();
+    };
+    dropdown.appendChild(forwardItem);
+
+    // Option 3: Copy Text
     if (msg.text) {
       const copyItem = document.createElement('button');
       copyItem.type = 'button';
@@ -1845,7 +1859,7 @@
       dropdown.appendChild(copyItem);
     }
 
-    // Option 3: Select messages (Multi-select & Forward)
+    // Option 4: Select messages (Multi-select & Forward)
     const selectItem = document.createElement('button');
     selectItem.type = 'button';
     selectItem.className = 'msg-dropdown-item';
@@ -2231,6 +2245,14 @@
     el.forwardConfirmBtn.onclick = confirmForward;
   }
 
+  if (el.forwardDialog) {
+    el.forwardDialog.addEventListener('close', () => {
+      if (!state.isSelectionMode) {
+        state.selectedMessageIds.clear();
+      }
+    });
+  }
+
   async function confirmForward() {
     if (!state.selectedForwardTargets.size || !state.selectedMessageIds.size) return;
     if (el.forwardConfirmBtn) el.forwardConfirmBtn.disabled = true;
@@ -2421,9 +2443,9 @@
   function renderLightboxGallery(activeUrl) {
     if (!el.lightboxGallery) return;
     el.lightboxGallery.replaceChildren();
-    const mediaItems = lightboxPlaylist && lightboxPlaylist.length > 0 ? lightboxPlaylist : getChatMediaItems();
+    const mediaItems = (lightboxPlaylist && lightboxPlaylist.length > 0) ? lightboxPlaylist : getChatMediaItems();
 
-    if (mediaItems.length <= 1) {
+    if (!mediaItems || mediaItems.length === 0) {
       if (el.lightboxGalleryWrap) el.lightboxGalleryWrap.hidden = true;
       return;
     }
@@ -2471,13 +2493,14 @@
       : media;
     if (!item || !item.url) return;
 
-    if (Array.isArray(customPlaylist) && customPlaylist.length > 0) {
+    const chatMedia = getChatMediaItems();
+    if (chatMedia.length > 0) {
+      const exists = chatMedia.some((m) => m.url === item.url);
+      if (!exists) chatMedia.push(item);
+      lightboxPlaylist = chatMedia;
+    } else if (Array.isArray(customPlaylist) && customPlaylist.length > 0) {
       lightboxPlaylist = customPlaylist.map((m) => typeof m === 'string' ? { url: m, mediaType: 'image', mediaName: 'Photo' } : m);
     } else {
-      lightboxPlaylist = getChatMediaItems();
-    }
-
-    if (!lightboxPlaylist.length) {
       lightboxPlaylist = [item];
     }
 
@@ -3451,22 +3474,33 @@
       switchConversation(data.conversation.id);
     } catch (err) {
       if (err.data && err.data.requiresFriendRequest) {
-        const span = document.createElement('span');
-        span.textContent = `${err.message} `;
-        const reqBtn = document.createElement('button');
-        reqBtn.type = 'button';
-        reqBtn.className = 'btn-text';
-        reqBtn.style.color = 'var(--accent)';
-        reqBtn.style.fontWeight = '700';
-        reqBtn.textContent = 'Send Friend Request';
-        reqBtn.onclick = async () => {
-          reqBtn.disabled = true;
-          reqBtn.textContent = 'Sending…';
-          const normalized = getNormalizedPhone(el.dmCountry, el.dmPhone);
-          const ok = await sendFriendRequest(normalized);
-          if (ok) el.newChatDialog.close();
-        };
-        el.dmError.append(span, reqBtn);
+        const targetName = (err.data.user && err.data.user.name) || 'user';
+        try {
+          const reqRes = await api('/api/friends/request', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ phone }),
+          });
+          el.dmPhone.value = '';
+          el.newChatDialog.close();
+          if (reqRes && reqRes.status === 'accepted') {
+            toast(`You and ${targetName} are now friends! Opening chat…`);
+            await loadConversations();
+            const convRes = await api('/api/conversations/direct', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ phone }),
+            });
+            if (convRes && convRes.conversation) {
+              switchConversation(convRes.conversation.id);
+            }
+          } else {
+            toast(`Friend request sent to ${targetName}! Once accepted, you can chat.`);
+          }
+          loadFriends();
+        } catch (reqErr) {
+          el.dmError.textContent = reqErr.message || 'Failed to send friend request.';
+        }
       } else {
         el.dmError.textContent = err.message;
       }
