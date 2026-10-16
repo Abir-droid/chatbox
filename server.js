@@ -1463,6 +1463,48 @@ app.get('/api/conversations/:id/messages', authMiddleware, async (req, res) => {
       }
     } catch (e) {}
 
+    // Check which media files actually exist on disk or in chat_media_files
+    const referencedFiles = new Set();
+    for (const r of rows) {
+      if (r.media_url && r.media_url.includes('/static/uploads/')) {
+        referencedFiles.add(path.basename(r.media_url.split('/static/uploads/')[1].split('?')[0]));
+      }
+      if (r.media_list) {
+        try {
+          const list = typeof r.media_list === 'string' ? JSON.parse(r.media_list) : r.media_list;
+          if (Array.isArray(list)) {
+            for (const it of list) {
+              if (it && it.url && it.url.includes('/static/uploads/')) {
+                referencedFiles.add(path.basename(it.url.split('/static/uploads/')[1].split('?')[0]));
+              }
+            }
+          }
+        } catch {}
+      }
+    }
+
+    const existingFiles = new Set();
+    if (referencedFiles.size > 0) {
+      const fileArr = Array.from(referencedFiles);
+      for (const fname of fileArr) {
+        if (fs.existsSync(path.join(UPLOADS_DIR, fname))) {
+          existingFiles.add(fname);
+        }
+      }
+      const missingFromDisk = fileArr.filter((f) => !existingFiles.has(f));
+      if (missingFromDisk.length > 0) {
+        try {
+          const dbFiles = await pool.query(
+            'SELECT filename FROM chat_media_files WHERE filename = ANY($1)',
+            [missingFromDisk]
+          );
+          for (const row of dbFiles.rows) {
+            existingFiles.add(row.filename);
+          }
+        } catch (e) {}
+      }
+    }
+
     const messages = rows
       .map((r) => {
         let mediaList = null;
@@ -1475,6 +1517,20 @@ app.get('/api/conversations/:id/messages', authMiddleware, async (req, res) => {
           mediaList = [{ url: r.media_url, mediaType: r.media_type, mediaName: r.media_name }];
         }
 
+        let hasMissingMedia = false;
+        if (Array.isArray(mediaList)) {
+          mediaList = mediaList.map((m) => {
+            if (!m || !m.url) return m;
+            let missing = false;
+            if (m.url.includes('/static/uploads/')) {
+              const fname = path.basename(m.url.split('/static/uploads/')[1].split('?')[0]);
+              missing = !existingFiles.has(fname);
+            }
+            if (missing) hasMissingMedia = true;
+            return { ...m, missing };
+          });
+        }
+
         return {
           id: Number(r.id),
           conversationId: Number(r.conversation_id),
@@ -1485,6 +1541,7 @@ app.get('/api/conversations/:id/messages', authMiddleware, async (req, res) => {
           mediaType: r.media_type,
           mediaName: r.media_name,
           mediaList,
+          mediaMissing: hasMissingMedia,
           replyToId: r.reply_to_id ? Number(r.reply_to_id) : null,
           replyToSender: r.reply_to_sender || null,
           replyToText: r.reply_to_text || null,
@@ -1673,6 +1730,50 @@ app.post('/api/upload-multiple', authMiddleware, upload.array('media', 20), asyn
   }));
 
   res.json({ ok: true, files: results });
+});
+
+// Media: Auto-repair missing media from client cache
+app.post('/api/media/repair', authMiddleware, upload.single('media'), async (req, res) => {
+  try {
+    const rawFilename = req.body.filename;
+    if (!rawFilename || !req.file) {
+      return res.status(400).json({ ok: false, error: 'File and filename required.' });
+    }
+
+    const filename = path.basename(rawFilename);
+    const data = await fs.promises.readFile(req.file.path);
+    const destPath = path.join(UPLOADS_DIR, filename);
+
+    // Save to disk cache
+    await fs.promises.writeFile(destPath, data);
+
+    // Persist into PostgreSQL
+    await pool.query(
+      `INSERT INTO chat_media_files (filename, mime_type, data, size)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (filename) DO UPDATE SET data = $3, mime_type = $2, size = $4`,
+      [filename, req.file.mimetype || 'image/jpeg', data, data.length]
+    );
+
+    // Clean up temporary multer upload file if path differs
+    if (req.file.path !== destPath && fs.existsSync(req.file.path)) {
+      await fs.promises.unlink(req.file.path).catch(() => {});
+    }
+
+    // Broadcast to all connected clients that this media file is now restored!
+    if (typeof io !== 'undefined') {
+      io.emit('media_restored', {
+        filename,
+        url: `${PREFIX}/static/uploads/${filename}`,
+      });
+    }
+
+    console.log(`Media repaired and persisted from client: ${filename} (${data.length} bytes)`);
+    res.json({ ok: true, filename });
+  } catch (err) {
+    console.error('Media repair failed:', err);
+    res.status(500).json({ ok: false, error: 'Failed to repair media.' });
+  }
 });
 
 // Messages: Edit (Telegram-style inline message editing)

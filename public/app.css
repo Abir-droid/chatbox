@@ -1618,6 +1618,13 @@ button:active {
   transform: scale(1.015);
 }
 
+.msg-media img.media-broken,
+.collage-item img.media-broken {
+  min-height: 80px;
+  background: var(--surface-2);
+  opacity: 0.6;
+}
+
 .msg-media video {
   width: 100%;
   max-height: 340px;

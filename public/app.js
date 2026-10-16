@@ -1072,6 +1072,22 @@
       }
     });
 
+    socket.on('media_restored', ({ filename, url }) => {
+      const normalized = normalizeMediaUrl(url);
+      document.querySelectorAll('img, video, audio').forEach((mediaEl) => {
+        if (mediaEl.src && mediaEl.src.includes(filename)) {
+          mediaEl.src = `${normalized}?t=${Date.now()}`;
+          mediaEl.classList.remove('media-broken');
+        }
+      });
+      if (currentLightboxMedia && currentLightboxMedia.url && currentLightboxMedia.url.includes(filename)) {
+        if (el.lightboxImg) {
+          el.lightboxImg.src = `${normalized}?t=${Date.now()}`;
+          el.lightboxImg.classList.remove('media-broken');
+        }
+      }
+    });
+
     socket.on('typing', ({ conversationId, userId, userName, typing }) => {
       if (state.activeConversationId === conversationId && userId !== state.user.id) {
         if (typing) {
@@ -1342,7 +1358,17 @@
     // Load message history
     try {
       const data = await api(`/api/conversations/${convId}/messages`);
-      renderMessages(data.messages || []);
+      const msgs = data.messages || [];
+      renderMessages(msgs);
+      // Auto-repair any missing media if cached in this browser
+      msgs.forEach((m) => {
+        const list = m.mediaList || (m.mediaUrl ? [{ url: m.mediaUrl, missing: m.mediaMissing }] : []);
+        list.forEach((it) => {
+          if (it && it.missing) {
+            repairIfCached(it);
+          }
+        });
+      });
     } catch (err) {
       toast(err.message);
     }
@@ -1440,6 +1466,63 @@
       a.click();
       document.body.removeChild(a);
     }
+  }
+
+  const repairingMediaSet = new Set();
+  function repairIfCached(item, fallbackImg) {
+    if (!item || !item.url) return;
+    const url = normalizeMediaUrl(item.url);
+    if (!url.includes('/static/uploads/')) return;
+    const filename = url.split('/static/uploads/')[1].split('?')[0];
+    if (!filename || repairingMediaSet.has(filename)) return;
+    repairingMediaSet.add(filename);
+
+    const tryUploadBlob = async (blob) => {
+      if (!blob || blob.size === 0) return false;
+      const fd = new FormData();
+      fd.append('filename', filename);
+      fd.append('media', blob, filename);
+      const res = await fetch(`${BASE}/api/media/repair`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${state.token}` },
+        body: fd,
+      });
+      if (res.ok) {
+        item.missing = false;
+        return true;
+      }
+      return false;
+    };
+
+    // Attempt 1: Fetch from browser cache
+    fetch(url, { cache: 'force-cache' })
+      .then((r) => {
+        if (!r.ok) throw new Error('Not in HTTP cache');
+        return r.blob();
+      })
+      .then(async (blob) => {
+        const ok = await tryUploadBlob(blob);
+        if (!ok) throw new Error('Blob upload failed');
+      })
+      .catch(async () => {
+        // Attempt 2: If browser rendered image via DOM cache, draw to canvas
+        if (fallbackImg && fallbackImg.complete && fallbackImg.naturalWidth > 0) {
+          try {
+            const canvas = document.createElement('canvas');
+            canvas.width = fallbackImg.naturalWidth;
+            canvas.height = fallbackImg.naturalHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(fallbackImg, 0, 0);
+            canvas.toBlob(async (blob) => {
+              if (blob) await tryUploadBlob(blob);
+            }, 'image/jpeg', 0.95);
+          } catch (e) {
+            repairingMediaSet.delete(filename);
+          }
+        } else {
+          repairingMediaSet.delete(filename);
+        }
+      });
   }
 
   function appendMessage(msg, isLastInCluster = true) {
@@ -1629,6 +1712,13 @@
           img.src = normalizeMediaUrl(item.url);
           img.alt = item.mediaName || 'Photo';
           img.loading = 'lazy';
+          img.onload = () => {
+            if (item.missing) repairIfCached(item, img);
+          };
+          img.onerror = () => {
+            img.classList.add('media-broken');
+            if (item.missing) repairIfCached(item, img);
+          };
           itemEl.appendChild(img);
         }
 
@@ -1715,6 +1805,13 @@
         img.src = normalizeMediaUrl(mediaUrl);
         img.alt = singleItem.mediaName || 'Photo';
         img.loading = 'lazy';
+        img.onload = () => {
+          if (singleItem.missing) repairIfCached(singleItem, img);
+        };
+        img.onerror = () => {
+          img.classList.add('media-broken');
+          if (singleItem.missing) repairIfCached(singleItem, img);
+        };
         img.onclick = () => {
           if (!isUploading) openLightbox(singleItem);
         };
