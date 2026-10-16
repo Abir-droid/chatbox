@@ -2027,7 +2027,7 @@ button:active {
 /* Message reaction badge (WhatsApp style placement overlapping bubble bottom border) */
 .msg-reactions {
   position: absolute;
-  bottom: -14px;
+  bottom: -19px;
   z-index: 15;
   display: flex;
   align-items: center;
@@ -2044,7 +2044,7 @@ button:active {
 }
 
 .bubble.has-reactions {
-  margin-bottom: 16px !important;
+  margin-bottom: 22px !important;
   min-width: 56px;
 }
 
