@@ -1300,6 +1300,10 @@ button:active {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .msg-row {
@@ -1309,6 +1313,8 @@ button:active {
   width: fit-content;
   gap: 0.55rem;
   max-width: 76%;
+  min-width: 0;
+  box-sizing: border-box;
   position: relative;
   animation: msgPopIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
@@ -1351,6 +1357,9 @@ button:active {
   display: flex;
   flex-direction: column;
   gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 /* Hide legacy outer meta bar - time and ticks are now integrated inside bubble */
@@ -1464,6 +1473,10 @@ button:active {
   font-size: 0.93rem;
   line-height: 1.42;
   word-break: break-word;
+  overflow-wrap: break-word;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   background: var(--bubble-other);
   color: var(--bubble-other-ink);
   border: 1px solid var(--bubble-other-line);
@@ -1741,6 +1754,10 @@ button:active {
   cursor: pointer;
   transition: opacity 0.15s ease, background 0.15s ease;
   user-select: none;
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 [data-theme="dark"] .msg-reply-quote {
@@ -1762,6 +1779,7 @@ button:active {
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+  max-width: 100%;
   overflow: hidden;
 }
 
@@ -1772,6 +1790,7 @@ button:active {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .msg-row.own .msg-reply-author {
@@ -1781,10 +1800,18 @@ button:active {
 .msg-reply-snippet {
   font-size: 0.78rem;
   color: var(--ink-secondary);
-  white-space: nowrap;
+  white-space: pre-line;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
   text-overflow: ellipsis;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+  max-height: 2.7em;
   opacity: 0.95;
+  max-width: 100%;
 }
 
 .msg-row.own .msg-reply-snippet {
@@ -2230,9 +2257,16 @@ button:active {
 .reply-bar-snippet {
   font-size: 0.84rem;
   color: var(--ink-secondary);
-  white-space: nowrap;
+  white-space: pre-line;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
   text-overflow: ellipsis;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+  max-height: 2.7em;
 }
 
 .reply-close {
@@ -3846,7 +3880,9 @@ dialog.lightbox-dialog::backdrop {
 
   .msg-row {
     max-width: 88%;
+    min-width: 0;
     gap: 0.5rem;
+    box-sizing: border-box;
   }
 
   .msg-row .avatar,
@@ -3863,6 +3899,9 @@ dialog.lightbox-dialog::backdrop {
     font-size: 0.92rem;
     line-height: 1.38;
     border-radius: 16px 16px 16px 4px;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
   }
 
   .msg-row.own .bubble {
@@ -4098,6 +4137,10 @@ dialog.lightbox-dialog::backdrop {
   .btn-secondary .btn-icon {
     width: 18px;
     height: 18px;
+  }
+  .msg-row {
+    max-width: 90%;
+    min-width: 0;
   }
 }
 

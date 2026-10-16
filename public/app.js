@@ -1633,11 +1633,14 @@
       quoteDiv.className = 'msg-reply-quote';
       quoteDiv.title = 'Click to jump to replied message';
       const replyAuthor = msg.replyToSender || msg.reply_to_sender || 'User';
-      const replySnippet = msg.replyToText || msg.reply_to_text || 'Original message';
+      const rawSnippet = msg.replyToText || msg.reply_to_text || 'Original message';
+      const cleanSnippet = typeof rawSnippet === 'string'
+        ? rawSnippet.trim().replace(/\r\n/g, '\n').replace(/\n\s*\n+/g, '\n')
+        : 'Original message';
       quoteDiv.innerHTML = `
         <div class="msg-reply-body">
           <span class="msg-reply-author">${escapeHtml(replyAuthor)}</span>
-          <span class="msg-reply-snippet">${escapeHtml(replySnippet)}</span>
+          <span class="msg-reply-snippet">${escapeHtml(cleanSnippet)}</span>
         </div>
       `;
       quoteDiv.onclick = (e) => {
@@ -2506,19 +2509,32 @@
   /* ------------------------------------------------------------- reply feature */
   function startReply(msg) {
     cancelEdit();
-    let snippet = msg.text || '';
+    let snippet = '';
+    if (msg.text) {
+      snippet = msg.text
+        .trim()
+        .replace(/\r\n/g, '\n')
+        .replace(/\n\s*\n+/g, '\n');
+    }
     if (!snippet) {
-      const type = (msg.mediaType || msg.media_type || '').toLowerCase();
-      if (type === 'audio') snippet = 'Voice note';
-      else if (type === 'image') snippet = 'Photo';
-      else if (type === 'video') snippet = 'Video';
-      else snippet = 'Attachment';
+      const rawMediaList = Array.isArray(msg.mediaList) && msg.mediaList.length > 0
+        ? msg.mediaList
+        : (msg.mediaUrl || msg.media_url ? [{ url: msg.mediaUrl || msg.media_url, mediaType: msg.mediaType || msg.media_type }] : []);
+      if (rawMediaList.length > 1) {
+        snippet = `${rawMediaList.length} Photos/Videos`;
+      } else {
+        const type = (msg.mediaType || msg.media_type || (rawMediaList[0] && rawMediaList[0].mediaType) || '').toLowerCase();
+        if (type === 'audio') snippet = 'Voice note';
+        else if (type === 'image') snippet = 'Photo';
+        else if (type === 'video') snippet = 'Video';
+        else snippet = 'Attachment';
+      }
     }
     const senderName = msg.senderName || (msg.senderId === state.user?.id ? 'You' : 'User');
     state.replyTarget = {
       id: msg.id,
       senderName,
-      text: snippet.length > 80 ? snippet.slice(0, 80) + '…' : snippet,
+      text: snippet.length > 160 ? snippet.slice(0, 160) + '…' : snippet,
     };
 
     if (el.replyPreviewBar) {
