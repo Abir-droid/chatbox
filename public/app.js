@@ -1876,10 +1876,6 @@
     bubble.appendChild(bubbleMeta);
 
     // Message reactions container
-    const reactionsDiv = document.createElement('div');
-    reactionsDiv.className = 'msg-reactions';
-    reactionsDiv.id = `msg-reactions-${msg.id}`;
-    bubble.appendChild(reactionsDiv);
     renderMessageReactions(msg.id, msg.reactions, bubble);
 
     bodyDiv.appendChild(bubble);
@@ -3745,7 +3741,13 @@
     const bubble = targetBubble || document.getElementById(`msg-bubble-${messageId}`);
     if (!bubble) return;
 
-    let reactionsDiv = document.getElementById(`msg-reactions-${messageId}`);
+    // Ensure strictly ONE reactions container exists inside this message bubble
+    const existingContainers = bubble.querySelectorAll('.msg-reactions');
+    let reactionsDiv = existingContainers[0];
+    for (let i = 1; i < existingContainers.length; i++) {
+      existingContainers[i].remove();
+    }
+
     if (!reactionsDiv) {
       reactionsDiv = document.createElement('div');
       reactionsDiv.className = 'msg-reactions';
