@@ -4282,6 +4282,12 @@ dialog.lightbox-dialog::backdrop {
     max-width: 100%;
     min-width: 0;
     box-sizing: border-box;
+    -webkit-touch-callout: none;
+  }
+
+  /* Hide hover emoji button on phone screens - emoji bar is triggered by long-press on bubble */
+  .msg-react-btn {
+    display: none !important;
   }
 
   .msg-row.own .bubble {

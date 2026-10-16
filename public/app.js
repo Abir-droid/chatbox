@@ -1996,31 +1996,41 @@
             reactionBar.classList.add('open-down');
           }
 
-          // Horizontal bounds clamping: keep reaction bar completely inside visible chat area
+          // Horizontal bounds clamping: position reaction bar above bubble and clamp inside visible chat area
           const mRect = menuWrap.getBoundingClientRect();
+          const bRect = bubble.getBoundingClientRect();
           const barWidth = reactionBar.offsetWidth || 268;
           const isOwn = li.classList.contains('own');
 
-          // Natural unscaled bounds from CSS left: 0 / right: 0
-          const naturalRight = isOwn ? mRect.right : mRect.left + barWidth;
-          const naturalLeft = isOwn ? mRect.right - barWidth : mRect.left;
+          // Position reaction bar above the bubble:
+          // For .own: align right edge with bubble's right edge
+          // For not .own: align left edge with bubble's left edge
+          let targetLeft, targetRight;
+          if (isOwn) {
+            targetRight = bRect.right;
+            targetLeft = bRect.right - barWidth;
+          } else {
+            targetLeft = bRect.left;
+            targetRight = bRect.left + barWidth;
+          }
 
           const minAllowedLeft = Math.max(lRect.left + 8, 8);
           const maxAllowedRight = Math.min(lRect.right - 8, window.innerWidth - 8);
 
-          let shiftX = 0;
-          if (naturalLeft < minAllowedLeft) {
-            shiftX = minAllowedLeft - naturalLeft;
-          } else if (naturalRight > maxAllowedRight) {
-            shiftX = maxAllowedRight - naturalRight;
+          // Clamping to screen boundaries
+          if (targetLeft < minAllowedLeft) {
+            targetLeft = minAllowedLeft;
+            targetRight = minAllowedLeft + barWidth;
+          }
+          if (targetRight > maxAllowedRight) {
+            targetRight = maxAllowedRight;
+            targetLeft = Math.max(minAllowedLeft, maxAllowedRight - barWidth);
           }
 
-          // Safety check: don't push past opposite boundary on very narrow viewports
-          if (naturalLeft + shiftX < minAllowedLeft) {
-            shiftX = minAllowedLeft - naturalLeft;
-          } else if (naturalRight + shiftX > maxAllowedRight) {
-            shiftX = Math.max(minAllowedLeft - naturalLeft, maxAllowedRight - naturalRight);
-          }
+          // CSS origins:
+          // For .own, right: 0 aligns with mRect.right
+          // For not .own, left: 0 aligns with mRect.left
+          const shiftX = isOwn ? (targetRight - mRect.right) : (targetLeft - mRect.left);
 
           if (Math.abs(shiftX) > 0.5) {
             reactionBar.style.setProperty('--rx-shift-x', `${Math.round(shiftX)}px`);
@@ -2061,9 +2071,15 @@
 
     downBtn.onclick = (e) => toggleMsgMenu(e);
 
-    // Context menu (Right-click) on bubble
+    // Context menu (Right-click on desktop, long-press on mobile)
     bubble.addEventListener('contextmenu', (e) => {
-      toggleMsgMenu(e);
+      e.preventDefault();
+      if (!reactionBar.hidden) return;
+      if (window.innerWidth <= 768) {
+        toggleReactionBar(e);
+      } else {
+        toggleMsgMenu(e);
+      }
     });
 
     // Touchscreen: Swipe to reply & Long-Press (420ms)
@@ -2088,7 +2104,7 @@
           if (navigator.vibrate) {
             try { navigator.vibrate(25); } catch {}
           }
-          toggleMsgMenu(e);
+          toggleReactionBar(e);
         }
       }, 420);
     }, { passive: true });
