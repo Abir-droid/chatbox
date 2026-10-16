@@ -2934,8 +2934,18 @@
   function adjustInputHeight() {
     if (!el.input) return;
     el.input.style.height = 'auto';
-    const newHeight = Math.min(Math.max(el.input.scrollHeight, 38), 110);
-    el.input.style.height = newHeight + 'px';
+    const isMobile = window.innerWidth <= 768;
+    const minH = isMobile ? 36 : 42;
+    const maxH = isMobile ? 100 : 120;
+    const scrollH = el.input.scrollHeight;
+    if (scrollH > maxH) {
+      el.input.style.height = maxH + 'px';
+      el.input.style.overflowY = 'auto';
+    } else {
+      const newHeight = Math.max(scrollH, minH);
+      el.input.style.height = newHeight + 'px';
+      el.input.style.overflowY = 'hidden';
+    }
   }
 
   // Typing indicator broadcast & typing sound effect
@@ -4503,6 +4513,7 @@
 
   window.addEventListener('resize', () => {
     updateMenuButton();
+    adjustInputHeight();
   });
 
   document.addEventListener('keydown', (e) => {
@@ -4585,5 +4596,6 @@
   }
   paintTheme();
   initEmojiPicker();
+  adjustInputHeight();
   checkInitialAuth();
 })();
