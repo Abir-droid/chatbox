@@ -1169,6 +1169,7 @@
     document.querySelectorAll('.msg-reaction-bar:not([hidden])').forEach((r) => (r.hidden = true));
     document.querySelectorAll('.msg-react-btn.active').forEach((b) => b.classList.remove('active'));
     document.querySelectorAll('.msg-row.show-menu').forEach((r) => r.classList.remove('show-menu'));
+    document.querySelectorAll('.msg-row.hover-actions').forEach((r) => r.classList.remove('hover-actions'));
     document.querySelectorAll('.chat-item-dropdown:not([hidden])').forEach((d) => (d.hidden = true));
     document.querySelectorAll('.chat-item-down-btn.active').forEach((b) => b.classList.remove('active'));
     closeReactionPicker();
@@ -1879,7 +1880,7 @@
     reactionsDiv.className = 'msg-reactions';
     reactionsDiv.id = `msg-reactions-${msg.id}`;
     bubble.appendChild(reactionsDiv);
-    renderMessageReactions(msg.id, msg.reactions);
+    renderMessageReactions(msg.id, msg.reactions, bubble);
 
     bodyDiv.appendChild(bubble);
 
@@ -1948,6 +1949,7 @@
         reactionBar.hidden = false;
         reactBtn.classList.add('active');
         li.classList.add('show-menu');
+        li.classList.add('hover-actions');
 
         reactionBar.classList.remove('open-down');
         if (el.log) {
@@ -1977,6 +1979,7 @@
         dropdown.hidden = false;
         downBtn.classList.add('active');
         li.classList.add('show-menu');
+        li.classList.add('hover-actions');
 
         dropdown.classList.remove('open-up');
         if (el.log) {
@@ -2194,6 +2197,28 @@
     if (!isUploading) {
       menuWrap.append(reactBtn, downBtn, reactionBar, dropdown);
       li.appendChild(menuWrap);
+
+      // Smooth desktop hover with grace timer: prevents menu from disappearing during cursor transit
+      let hoverLeaveTimer = null;
+      const onHoverEnter = () => {
+        if (hoverLeaveTimer) {
+          clearTimeout(hoverLeaveTimer);
+          hoverLeaveTimer = null;
+        }
+        li.classList.add('hover-actions');
+      };
+      const onHoverLeave = () => {
+        if (dropdown.hidden && reactionBar.hidden) {
+          hoverLeaveTimer = setTimeout(() => {
+            li.classList.remove('hover-actions');
+          }, 280);
+        }
+      };
+
+      li.addEventListener('mouseenter', onHoverEnter);
+      li.addEventListener('mouseleave', onHoverLeave);
+      menuWrap.addEventListener('mouseenter', onHoverEnter);
+      menuWrap.addEventListener('mouseleave', onHoverLeave);
     }
 
     li.appendChild(bodyDiv);
@@ -3716,8 +3741,8 @@
     }
   }
 
-  function renderMessageReactions(messageId, reactions) {
-    const bubble = document.getElementById(`msg-bubble-${messageId}`);
+  function renderMessageReactions(messageId, reactions, targetBubble = null) {
+    const bubble = targetBubble || document.getElementById(`msg-bubble-${messageId}`);
     if (!bubble) return;
 
     let reactionsDiv = document.getElementById(`msg-reactions-${messageId}`);
@@ -3730,41 +3755,100 @@
 
     reactionsDiv.replaceChildren();
 
-    if (!Array.isArray(reactions) || reactions.length === 0) {
+    const validReactions = Array.isArray(reactions)
+      ? reactions.filter((r) => r && r.count > 0)
+      : [];
+
+    const totalCount = validReactions.reduce((sum, r) => sum + (r.count || 0), 0);
+
+    if (totalCount <= 0) {
       reactionsDiv.hidden = true;
+      bubble.classList.remove('has-reactions');
       return;
     }
 
     reactionsDiv.hidden = false;
+    bubble.classList.add('has-reactions');
+
+    // Sort reactions by count descending
+    const sorted = validReactions.slice().sort((a, b) => b.count - a.count);
     const currentUserId = state.user ? state.user.id : null;
+    const userReaction = sorted.find((r) => Array.isArray(r.users) && r.users.some((u) => u.id === currentUserId));
+    const isUserReacted = !!userReaction;
 
-    for (const r of reactions) {
-      if (!r || r.count <= 0) continue;
-      const isUserReacted = Array.isArray(r.users) && r.users.some((u) => u.id === currentUserId);
-
-      const chip = document.createElement('button');
-      chip.type = 'button';
-      chip.className = `reaction-chip ${isUserReacted ? 'active' : ''}`;
-      chip.setAttribute('data-emoji', r.emoji);
-
-      let namesTooltip = '';
+    // Build names tooltip
+    const tooltipParts = [];
+    for (const r of sorted) {
       if (Array.isArray(r.users) && r.users.length) {
-        const names = r.users.map((u) => (u.id === currentUserId ? 'You' : u.name || 'User'));
-        namesTooltip = names.join(', ');
+        const userNames = r.users.map((u) => (u.id === currentUserId ? 'You' : u.name || 'User'));
+        tooltipParts.push(`${r.emoji} ${userNames.join(', ')}`);
       }
-      chip.title = namesTooltip || `${r.emoji} reaction`;
+    }
+    const fullTooltip = tooltipParts.join(' • ') || 'Reactions';
 
-      chip.innerHTML = `
-        <span class="reaction-emoji">${r.emoji}</span>
-        <span class="reaction-count">${r.count}</span>
-      `;
+    if (totalCount === 1) {
+      // Single reaction: WhatsApp style compact pill with NO number!
+      const single = sorted[0];
+      const pill = document.createElement('button');
+      pill.type = 'button';
+      pill.className = `reaction-badge-pill single ${isUserReacted ? 'user-reacted' : ''}`;
+      pill.title = fullTooltip;
+      pill.setAttribute('aria-label', `${single.emoji} reaction`);
 
-      chip.onclick = (e) => {
+      const emojisWrap = document.createElement('span');
+      emojisWrap.className = 'badge-emojis';
+
+      const emojiItem = document.createElement('span');
+      emojiItem.className = 'badge-emoji-item';
+      emojiItem.textContent = single.emoji;
+      emojisWrap.appendChild(emojiItem);
+
+      pill.appendChild(emojisWrap);
+
+      pill.onclick = (e) => {
         e.stopPropagation();
-        toggleReaction(messageId, r.emoji);
+        toggleReaction(messageId, single.emoji);
       };
 
-      reactionsDiv.appendChild(chip);
+      reactionsDiv.appendChild(pill);
+    } else {
+      // Multiple reactions: top distinct emojis (up to 3) side-by-side + total count number!
+      const pill = document.createElement('div');
+      pill.className = `reaction-badge-pill multi ${isUserReacted ? 'user-reacted' : ''}`;
+      pill.title = fullTooltip;
+
+      const emojisWrap = document.createElement('span');
+      emojisWrap.className = 'badge-emojis';
+
+      const topReactions = sorted.slice(0, 3);
+      for (const r of topReactions) {
+        const emojiItem = document.createElement('span');
+        emojiItem.className = 'badge-emoji-item';
+        emojiItem.textContent = r.emoji;
+        emojiItem.title = `${r.emoji} (${r.count})`;
+        emojiItem.onclick = (e) => {
+          e.stopPropagation();
+          toggleReaction(messageId, r.emoji);
+        };
+        emojisWrap.appendChild(emojiItem);
+      }
+
+      const countSpan = document.createElement('span');
+      countSpan.className = 'badge-count';
+      countSpan.textContent = totalCount;
+
+      pill.append(emojisWrap, countSpan);
+
+      pill.onclick = (e) => {
+        e.stopPropagation();
+        if (userReaction) {
+          toggleReaction(messageId, userReaction.emoji);
+        } else {
+          toggleReaction(messageId, topReactions[0].emoji);
+        }
+      };
+
+      reactionsDiv.appendChild(pill);
     }
   }
 

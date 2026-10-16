@@ -1840,19 +1840,36 @@ button:active {
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.15s ease;
+  box-sizing: border-box;
+}
+
+/* Invisible hover bridge extending hit-area back onto bubble */
+.msg-menu-wrap::before {
+  content: "";
+  position: absolute;
+  top: -12px;
+  bottom: -12px;
+  left: -20px;
+  right: -20px;
+  z-index: -1;
+  pointer-events: auto;
 }
 
 .msg-row:not(.own) .msg-menu-wrap {
-  left: calc(100% + 6px);
+  left: 100%;
+  padding-left: 6px;
 }
 
 .msg-row.own .msg-menu-wrap {
-  right: calc(100% + 6px);
+  right: 100%;
+  padding-right: 6px;
   flex-direction: row-reverse;
 }
 
 .msg-row:hover .msg-menu-wrap,
+.msg-row.hover-actions .msg-menu-wrap,
 .msg-row.show-menu .msg-menu-wrap,
+.msg-menu-wrap:hover,
 .msg-menu-wrap:has(.msg-down-btn.active),
 .msg-menu-wrap:has(.msg-react-btn.active),
 .msg-menu-wrap:has(.msg-reaction-bar:not([hidden])) {
@@ -2007,60 +2024,129 @@ button:active {
   border-color: var(--accent);
 }
 
-/* Reaction chips on message bubble */
+/* Message reaction badge (WhatsApp style placement overlapping bubble bottom border) */
 .msg-reactions {
+  position: absolute;
+  bottom: -11px;
+  z-index: 15;
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
-  margin-top: 5px;
-  width: fit-content;
+  pointer-events: auto;
+  user-select: none;
 }
 
-.reaction-chip {
+.msg-row:not(.own) .msg-reactions {
+  left: 10px;
+}
+
+.msg-row.own .msg-reactions {
+  right: 10px;
+}
+
+.bubble.has-reactions {
+  margin-bottom: 14px !important;
+  min-width: 56px;
+}
+
+.reaction-badge-pill {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 7px;
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 1.5px solid var(--line);
   border-radius: 9999px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--ink);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.16), var(--shadow-sm);
   cursor: pointer;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
-  transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.12s ease, border-color 0.12s ease;
+  transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
   user-select: none;
   animation: reactionBadgePop 0.18s cubic-bezier(0.175, 0.885, 0.32, 1.275) both;
+  color: var(--ink);
+  line-height: 1;
+  box-sizing: border-box;
+}
+
+.reaction-badge-pill:hover {
+  transform: scale(1.1);
+  background: var(--surface-2);
+  border-color: var(--line-strong);
+}
+
+.reaction-badge-pill.user-reacted {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+[data-theme="dark"] .reaction-badge-pill {
+  background: #1e293b;
+  border-color: rgba(255, 255, 255, 0.14);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+
+[data-theme="dark"] .reaction-badge-pill:hover {
+  background: #273549;
+  border-color: rgba(255, 255, 255, 0.24);
+}
+
+[data-theme="dark"] .reaction-badge-pill.user-reacted {
+  background: rgba(56, 189, 248, 0.18);
+  border-color: var(--accent);
+}
+
+/* Single reaction pill (1 react) - circular / compact with NO number */
+.reaction-badge-pill.single {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  justify-content: center;
+}
+
+.reaction-badge-pill.single .badge-emojis {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+/* Multi reaction pill (>1 reacts) - distinct emojis side-by-side + count */
+.reaction-badge-pill.multi {
+  height: 24px;
+  padding: 0 7px 0 5px;
+  gap: 3px;
+}
+
+.reaction-badge-pill .badge-emojis {
+  display: inline-flex;
+  align-items: center;
+  gap: 1.5px;
+  line-height: 1;
+}
+
+.reaction-badge-pill .badge-emoji-item {
+  font-size: 0.92rem;
+  line-height: 1;
+  display: inline-block;
+  transition: transform 0.12s ease;
+}
+
+.reaction-badge-pill .badge-emoji-item:hover {
+  transform: scale(1.22);
+}
+
+.reaction-badge-pill .badge-count {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--ink-secondary);
+  line-height: 1;
+  margin-left: 2px;
+}
+
+[data-theme="dark"] .reaction-badge-pill .badge-count {
+  color: rgba(255, 255, 255, 0.88);
 }
 
 @keyframes reactionBadgePop {
   0% { transform: scale(0.6); opacity: 0; }
   100% { transform: scale(1); opacity: 1; }
-}
-
-.reaction-chip:hover {
-  transform: scale(1.08);
-  background: var(--surface-2);
-  border-color: var(--line-strong);
-}
-
-.reaction-chip.active {
-  background: rgba(99, 102, 241, 0.14);
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.reaction-chip .reaction-emoji {
-  font-size: 0.96rem;
-  line-height: 1;
-}
-
-.reaction-chip .reaction-count {
-  font-size: 0.74rem;
-  font-weight: 600;
-  line-height: 1;
 }
 
 /* Full reaction picker popover */
