@@ -529,7 +529,12 @@ app.get(['/favicon.ico', '/static/favicon.svg'], (req, res) => {
 });
 
 // Serve static assets and uploaded media with dynamic PostgreSQL restore
-app.get('/static/uploads/:filename', async (req, res, next) => {
+const uploadRoutes = [
+  '/static/uploads/:filename',
+  ...(PREFIX ? [`${PREFIX}/static/uploads/:filename`] : []),
+];
+
+app.get(uploadRoutes, async (req, res, next) => {
   const filename = path.basename(req.params.filename);
   const filePath = path.join(UPLOADS_DIR, filename);
 
@@ -552,6 +557,7 @@ app.get('/static/uploads/:filename', async (req, res, next) => {
       }
       res.setHeader('Content-Type', rows[0].mime_type || 'application/octet-stream');
       res.setHeader('Cache-Control', 'public, max-age=2592000');
+      res.setHeader('Content-Length', rows[0].data.length);
       return res.end(rows[0].data);
     }
   } catch (err) {
@@ -561,19 +567,40 @@ app.get('/static/uploads/:filename', async (req, res, next) => {
   next();
 });
 
-app.use('/static/uploads', express.static(UPLOADS_DIR, { index: false, maxAge: '30d' }));
+const staticUploadsDirs = [
+  '/static/uploads',
+  ...(PREFIX ? [`${PREFIX}/static/uploads`] : []),
+];
+app.use(staticUploadsDirs, express.static(UPLOADS_DIR, { index: false, maxAge: '30d' }));
 app.use('/static', express.static(path.join(__dirname, 'public'), { index: false, maxAge: '7d' }));
 
 /* --------------------------------------------------------------- API routes */
 
-// Healthcheck
-app.get('/healthz', async (req, res) => {
+// Healthcheck with media diagnosis
+app.get(['/healthz', ...(PREFIX ? [`${PREFIX}/healthz`] : [])], async (req, res) => {
   res.set('Cache-Control', 'no-store');
   try {
     await pool.query('SELECT 1');
-    res.json({ ok: true, db: true, uptime: Math.round(process.uptime()) });
+    const filesCount = await pool.query('SELECT count(*) FROM chat_media_files');
+    const recentMedia = await pool.query(
+      `SELECT id, sender_name, media_url, media_type, created_at
+       FROM chat_messages
+       WHERE media_url IS NOT NULL OR media_list IS NOT NULL
+       ORDER BY id DESC LIMIT 5`
+    );
+    const mediaFiles = await pool.query(
+      'SELECT filename, mime_type, size, created_at FROM chat_media_files ORDER BY created_at DESC LIMIT 5'
+    );
+    res.json({
+      ok: true,
+      db: true,
+      uptime: Math.round(process.uptime()),
+      chatMediaFilesCount: Number(filesCount.rows[0].count),
+      recentMediaMessages: recentMedia.rows,
+      mediaFilesSample: mediaFiles.rows,
+    });
   } catch (err) {
-    res.status(503).json({ ok: false, db: false });
+    res.status(503).json({ ok: false, db: false, error: err.message });
   }
 });
 

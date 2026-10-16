@@ -252,12 +252,16 @@
 
   function normalizeMediaUrl(url) {
     if (!url) return '';
-    if (url.startsWith('blob:') || url.startsWith('data:') || url.startsWith('http://') || url.startsWith('https://')) {
+    if (url.startsWith('blob:') || url.startsWith('data:')) {
       return url;
     }
+    // Any uploaded file must route via ${BASE}/static/uploads/<filename> regardless of origin/scheme
     if (url.includes('/static/uploads/')) {
-      const filename = url.split('/static/uploads/')[1];
+      const filename = url.split('/static/uploads/')[1].split('?')[0];
       return `${BASE || ''}/static/uploads/${filename}`;
+    }
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return url;
     }
     if (url.startsWith('/static/')) {
       return `${BASE || ''}${url}`;
