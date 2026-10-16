@@ -1072,6 +1072,14 @@
       }
     });
 
+    socket.on('message_reaction_updated', ({ messageId, conversationId, reactions }) => {
+      const cached = state.messagesCache.get(messageId);
+      if (cached) {
+        cached.reactions = reactions;
+      }
+      renderMessageReactions(messageId, reactions);
+    });
+
     socket.on('media_restored', ({ filename, url }) => {
       const normalized = normalizeMediaUrl(url);
       document.querySelectorAll('img, video, audio').forEach((mediaEl) => {
@@ -1158,9 +1166,12 @@
   function closeAllDropdowns() {
     document.querySelectorAll('.msg-dropdown:not([hidden])').forEach((d) => (d.hidden = true));
     document.querySelectorAll('.msg-down-btn.active').forEach((b) => b.classList.remove('active'));
+    document.querySelectorAll('.msg-reaction-bar:not([hidden])').forEach((r) => (r.hidden = true));
+    document.querySelectorAll('.msg-react-btn.active').forEach((b) => b.classList.remove('active'));
     document.querySelectorAll('.msg-row.show-menu').forEach((r) => r.classList.remove('show-menu'));
     document.querySelectorAll('.chat-item-dropdown:not([hidden])').forEach((d) => (d.hidden = true));
     document.querySelectorAll('.chat-item-down-btn.active').forEach((b) => b.classList.remove('active'));
+    closeReactionPicker();
     if (el.convDropdown) el.convDropdown.hidden = true;
   }
 
@@ -1863,11 +1874,25 @@
     }
     bubble.appendChild(bubbleMeta);
 
+    // Message reactions container
+    const reactionsDiv = document.createElement('div');
+    reactionsDiv.className = 'msg-reactions';
+    reactionsDiv.id = `msg-reactions-${msg.id}`;
+    bubble.appendChild(reactionsDiv);
+    renderMessageReactions(msg.id, msg.reactions);
+
     bodyDiv.appendChild(bubble);
 
-    // Message options menu (down arrow on hover, right click, mobile long-press)
+    // Message options menu (emoji reaction trigger and down arrow on hover)
     const menuWrap = document.createElement('div');
     menuWrap.className = 'msg-menu-wrap';
+
+    const reactBtn = document.createElement('button');
+    reactBtn.type = 'button';
+    reactBtn.className = 'msg-react-btn';
+    reactBtn.title = 'Add reaction';
+    reactBtn.setAttribute('aria-label', 'Add reaction');
+    reactBtn.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>';
 
     const downBtn = document.createElement('button');
     downBtn.type = 'button';
@@ -1875,6 +1900,67 @@
     downBtn.title = 'Message options';
     downBtn.setAttribute('aria-label', 'Message options');
     downBtn.innerHTML = '<svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>';
+
+    const reactionBar = document.createElement('div');
+    reactionBar.className = 'msg-reaction-bar';
+    reactionBar.hidden = true;
+
+    const QUICK_REACTIONS = ['❤️', '😆', '😮', '😢', '😡', '👍'];
+    const currentUserId = state.user ? state.user.id : null;
+    const userCurrentEmoji = Array.isArray(msg.reactions)
+      ? (msg.reactions.find((r) => r.users && r.users.some((u) => u.id === currentUserId)) || {}).emoji
+      : null;
+
+    for (const qEmoji of QUICK_REACTIONS) {
+      const qBtn = document.createElement('button');
+      qBtn.type = 'button';
+      qBtn.className = `reaction-bar-btn ${userCurrentEmoji === qEmoji ? 'user-reacted' : ''}`;
+      qBtn.textContent = qEmoji;
+      qBtn.title = `React ${qEmoji}`;
+      qBtn.onclick = (e) => {
+        e.stopPropagation();
+        closeAllDropdowns();
+        toggleReaction(msg.id, qEmoji);
+      };
+      reactionBar.appendChild(qBtn);
+    }
+
+    const plusBtn = document.createElement('button');
+    plusBtn.type = 'button';
+    plusBtn.className = 'reaction-bar-btn reaction-bar-plus';
+    plusBtn.title = 'More reactions';
+    plusBtn.setAttribute('aria-label', 'More reactions');
+    plusBtn.innerHTML = '<svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+    plusBtn.onclick = (e) => {
+      e.stopPropagation();
+      openReactionPicker(msg.id, plusBtn);
+    };
+    reactionBar.appendChild(plusBtn);
+
+    function toggleReactionBar(e) {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      const willOpen = reactionBar.hidden;
+      closeAllDropdowns();
+      if (willOpen) {
+        reactionBar.hidden = false;
+        reactBtn.classList.add('active');
+        li.classList.add('show-menu');
+
+        reactionBar.classList.remove('open-down');
+        if (el.log) {
+          const rRect = reactionBar.getBoundingClientRect();
+          const lRect = el.log.getBoundingClientRect();
+          if (rRect.top < lRect.top + 10) {
+            reactionBar.classList.add('open-down');
+          }
+        }
+      }
+    }
+
+    reactBtn.onclick = (e) => toggleReactionBar(e);
 
     const dropdown = document.createElement('div');
     dropdown.className = 'msg-dropdown';
@@ -2105,8 +2191,8 @@
       dropdown.appendChild(delItem);
     }
 
-    if (dropdown.children.length > 0) {
-      menuWrap.append(downBtn, dropdown);
+    if (!isUploading) {
+      menuWrap.append(reactBtn, downBtn, reactionBar, dropdown);
       li.appendChild(menuWrap);
     }
 
@@ -3319,28 +3405,139 @@
     el.voiceSendBtn.onclick = () => stopVoiceRecording(false);
   }
 
-  /* ------------------------------------------------------------- emoji picker */
-  const EMOJIS = [
-    '😀','😂','🤣','😊','😍','🥰','😘','😜','😎','🥳','🤔','🤫','😴','😭','😡','🤯',
-    '👍','👎','👏','🙌','🤝','✌️','🤞','🫡','🙏','💪','👊','🔥','✨','❤️','💔','💯',
-    '🎉','🎂','🍻','☕','🍕','🍔','🚀','💻','📱','🎵','🎮','⭐','✅','❌','⚠️','👋'
+  /* ------------------------------------------------------------- emoji library & picker */
+  const EMOJI_CATEGORIES = [
+    {
+      id: 'smileys',
+      name: 'Smileys & Emotion',
+      icon: '😀',
+      emojis: [
+        '😀','😃','😄','😁','😆','😅','🤣','😂','🙂','🙃','🫠','😉','😊','😇','🥰','😍',
+        '🤩','😘','😗','😚','😙','🥲','😋','😛','😜','🤪','😝','🤑','🤗','🫣','🤭','🫢',
+        '🤫','🤔','🫡','🤐','🤨','😐','😑','😶','🫥','😏','😒','🙄','😬','🤥','🫨','😌',
+        '😔','😪','🤤','😴','😷','🤒','🤕','🤢','🤮','🤧','🥵','🥶','🥴','😵','🤯','🤠',
+        '🥳','🥸','😎','🤓','🧐','😕','😟','🙁','☹️','😮','😯','😲','😳','🥺','🥹','😦',
+        '😧','😨','😰','😥','😢','😭','😱','😖','😣','😞','😓','😩','😫','🥱','😤','😡',
+        '😠','🤬','😈','👿','💀','☠️','💩','🤡','👹','👺','👻','👽','👾','🤖'
+      ],
+    },
+    {
+      id: 'gestures',
+      name: 'People & Gestures',
+      icon: '👍',
+      emojis: [
+        '👍','👎','👏','🙌','👐','🤲','🤝','🙏','✌️','🤞','🫰','🤟','🤘','🤙','👈','👉',
+        '👆','🖕','👇','☝️','🫵','👋','🤚','🖐️','✋','🖖','🫱','🫲','🫳','🫴','👌','🤌',
+        '🤏','✊','👊','🤛','🤜','🫷','🫸','✍️','💅','🤳','💪','🦾','🦿','🦵','🦶','👂',
+        '🦻','👃','🧠','🫀','🫁','👀','👁️','👅','👄','👶','👧','🧒','👦','👩','🧑','👨',
+        '👱‍♀️','👱‍♂️','🧓','👵','👴'
+      ],
+    },
+    {
+      id: 'hearts',
+      name: 'Hearts & Reactions',
+      icon: '❤️',
+      emojis: [
+        '❤️','🧡','💛','💚','💙','💜','🤎','🖤','🤍','💔','❣️','💕','💞','💓','💗','💖',
+        '💘','💝','💟','🔥','✨','⭐','🌟','💫','💥','💯','💢','💤','💨','🎉','🎊','🎈',
+        '🎁','🏆','🥇','🥈','🥉','🏅','🎖️','🎯','🎲','🎵','🎶','🔔','💬','💭'
+      ],
+    },
+    {
+      id: 'animals',
+      name: 'Animals & Nature',
+      icon: '🐶',
+      emojis: [
+        '🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷','🐽','🐸','🐵',
+        '🙈','🙉','🙊','🐒','🐔','🐧','🐦','🐤','🐣','🐥','🦆','🦅','🦉','🦇','🐺','🐗',
+        '🐴','🦄','🐝','🐛','🦋','🐌','🐞','🐜','🐢','🐍','🦎','🐙','🦑','🦐','🦞','🦀',
+        '🐡','🐠','🐟','🐬','🐳','🐋','🦈','🐊','🐅','🐆','🦓','🦍','🐘','🦛','🦏'
+      ],
+    },
+    {
+      id: 'food',
+      name: 'Food & Drinks',
+      icon: '🍕',
+      emojis: [
+        '🍏','🍎','🍐','🍊','🍋','🍌','🍉','🍇','🍓','🫐','🍈','🍒','🍑','🥭','🍍','🥥',
+        '🥝','🍅','🍆','🥑','🥦','🌽','🌶️','🫑','🥒','🥬','🥔','🍠','🥐','🍞','🥖','🧀',
+        '🍳','🥞','🧇','🥓','🥩','🍗','🍖','🌭','🍔','🍟','🍕','🥪','🥙','🌮','🌯','🥗',
+        '🍿','🍣','🍱','🍦','🍧','🍨','🍩','🍪','🎂','🍰','🍫','🍬','🍭','☕','🍵','🧃',
+        '🥤','🍺','🍻','🥂','🍷','🥃','🍸','🍹'
+      ],
+    },
+    {
+      id: 'activities',
+      name: 'Travel & Objects',
+      icon: '🚀',
+      emojis: [
+        '⚽','🏀','🏈','⚾','🎾','🏐','🎱','🏓','🏸','🥅','🥊','🎯','🎮','🕹️','🚗','🚕',
+        '🚙','🚌','🏎️','🚓','🚑','🚒','🚲','🛵','🏍️','✈️','🚀','🛸','🚁','⛵','🚢','⚓',
+        '⏰','📱','💻','⌨️','🖥️','📷','🎥','📺','📻','💡','🔦','💰','💵','💳','💎'
+      ],
+    },
   ];
 
   function initEmojiPicker() {
+    if (!el.emojiPicker) return;
     el.emojiPicker.replaceChildren();
-    for (const emoji of EMOJIS) {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'emoji-btn-item';
-      btn.textContent = emoji;
-      btn.onclick = () => {
-        el.input.value += emoji;
-        adjustInputHeight();
-        el.emojiPicker.hidden = true;
-        el.input.focus();
+
+    const tabsBar = document.createElement('div');
+    tabsBar.className = 'emoji-cat-tabs';
+
+    const sectionsWrap = document.createElement('div');
+    sectionsWrap.className = 'emoji-sections-wrap';
+
+    EMOJI_CATEGORIES.forEach((cat, idx) => {
+      const tabBtn = document.createElement('button');
+      tabBtn.type = 'button';
+      tabBtn.className = `emoji-cat-tab-btn ${idx === 0 ? 'active' : ''}`;
+      tabBtn.textContent = cat.icon;
+      tabBtn.title = cat.name;
+      tabBtn.setAttribute('aria-label', cat.name);
+      tabBtn.onclick = (e) => {
+        e.stopPropagation();
+        tabsBar.querySelectorAll('.emoji-cat-tab-btn').forEach((b) => b.classList.remove('active'));
+        tabBtn.classList.add('active');
+        const targetSection = el.emojiPicker.querySelector(`#emoji-sec-${cat.id}`);
+        if (targetSection) {
+          targetSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
       };
-      el.emojiPicker.appendChild(btn);
-    }
+      tabsBar.appendChild(tabBtn);
+
+      const secDiv = document.createElement('div');
+      secDiv.id = `emoji-sec-${cat.id}`;
+      secDiv.className = 'emoji-section';
+
+      const title = document.createElement('div');
+      title.className = 'emoji-cat-title';
+      title.textContent = cat.name;
+      secDiv.appendChild(title);
+
+      const grid = document.createElement('div');
+      grid.className = 'emoji-cat-grid';
+
+      for (const emoji of cat.emojis) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'emoji-btn-item';
+        btn.textContent = emoji;
+        btn.title = emoji;
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          el.input.value += emoji;
+          adjustInputHeight();
+          el.input.focus();
+        };
+        grid.appendChild(btn);
+      }
+
+      secDiv.appendChild(grid);
+      sectionsWrap.appendChild(secDiv);
+    });
+
+    el.emojiPicker.append(tabsBar, sectionsWrap);
   }
 
   el.emojiBtn.onclick = (e) => {
@@ -3349,10 +3546,227 @@
   };
 
   document.addEventListener('click', (e) => {
-    if (!el.emojiPicker.contains(e.target) && e.target !== el.emojiBtn) {
+    if (el.emojiPicker && !el.emojiPicker.contains(e.target) && e.target !== el.emojiBtn) {
       el.emojiPicker.hidden = true;
     }
   });
+
+  /* ------------------------------------------------------------- message reaction handlers */
+  let activeReactionMsgId = null;
+
+  function openReactionPicker(msgId, anchorBtn) {
+    const popover = document.getElementById('reaction-full-picker-popover');
+    if (!popover) return;
+    activeReactionMsgId = msgId;
+
+    popover.replaceChildren();
+
+    const tabsBar = document.createElement('div');
+    tabsBar.className = 'emoji-cat-tabs';
+
+    const sectionsWrap = document.createElement('div');
+    sectionsWrap.className = 'emoji-sections-wrap';
+
+    EMOJI_CATEGORIES.forEach((cat, idx) => {
+      const tabBtn = document.createElement('button');
+      tabBtn.type = 'button';
+      tabBtn.className = `emoji-cat-tab-btn ${idx === 0 ? 'active' : ''}`;
+      tabBtn.textContent = cat.icon;
+      tabBtn.title = cat.name;
+      tabBtn.setAttribute('aria-label', cat.name);
+      tabBtn.onclick = (e) => {
+        e.stopPropagation();
+        tabsBar.querySelectorAll('.emoji-cat-tab-btn').forEach((b) => b.classList.remove('active'));
+        tabBtn.classList.add('active');
+        const targetSection = popover.querySelector(`#react-sec-${cat.id}`);
+        if (targetSection) {
+          targetSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      };
+      tabsBar.appendChild(tabBtn);
+
+      const secDiv = document.createElement('div');
+      secDiv.id = `react-sec-${cat.id}`;
+      secDiv.className = 'emoji-section';
+
+      const title = document.createElement('div');
+      title.className = 'emoji-cat-title';
+      title.textContent = cat.name;
+      secDiv.appendChild(title);
+
+      const grid = document.createElement('div');
+      grid.className = 'emoji-cat-grid';
+
+      for (const emoji of cat.emojis) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'emoji-btn-item';
+        btn.textContent = emoji;
+        btn.title = emoji;
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          toggleReaction(msgId, emoji);
+          closeAllDropdowns();
+        };
+        grid.appendChild(btn);
+      }
+
+      secDiv.appendChild(grid);
+      sectionsWrap.appendChild(secDiv);
+    });
+
+    popover.append(tabsBar, sectionsWrap);
+    popover.hidden = false;
+
+    if (anchorBtn) {
+      const rect = anchorBtn.getBoundingClientRect();
+      let top = rect.bottom + 8;
+      let left = rect.left - 130;
+
+      if (left + 330 > window.innerWidth) {
+        left = window.innerWidth - 340;
+      }
+      if (left < 10) left = 10;
+
+      if (top + 310 > window.innerHeight) {
+        top = Math.max(10, rect.top - 315);
+      }
+
+      popover.style.top = `${top}px`;
+      popover.style.left = `${left}px`;
+      popover.style.position = 'fixed';
+    }
+  }
+
+  function closeReactionPicker() {
+    const popover = document.getElementById('reaction-full-picker-popover');
+    if (popover) {
+      popover.hidden = true;
+      activeReactionMsgId = null;
+    }
+  }
+
+  async function toggleReaction(messageId, emoji) {
+    if (!messageId || !emoji) return;
+
+    // Optimistic cache update
+    const cached = state.messagesCache.get(messageId);
+    if (cached) {
+      if (!Array.isArray(cached.reactions)) cached.reactions = [];
+      const user = state.user || {};
+      const existingIdx = cached.reactions.findIndex((r) => r.users && r.users.some((u) => u.id === user.id));
+
+      if (existingIdx !== -1) {
+        const existing = cached.reactions[existingIdx];
+        if (existing.emoji === emoji) {
+          // Toggle off
+          existing.count--;
+          existing.users = existing.users.filter((u) => u.id !== user.id);
+          if (existing.count <= 0) {
+            cached.reactions.splice(existingIdx, 1);
+          }
+        } else {
+          // Switch to new emoji
+          existing.count--;
+          existing.users = existing.users.filter((u) => u.id !== user.id);
+          if (existing.count <= 0) {
+            cached.reactions.splice(existingIdx, 1);
+          }
+          const target = cached.reactions.find((r) => r.emoji === emoji);
+          if (target) {
+            target.count++;
+            target.users.push({ id: user.id, name: user.name });
+          } else {
+            cached.reactions.push({ emoji, count: 1, users: [{ id: user.id, name: user.name }] });
+          }
+        }
+      } else {
+        // Add new
+        const target = cached.reactions.find((r) => r.emoji === emoji);
+        if (target) {
+          target.count++;
+          target.users.push({ id: user.id, name: user.name });
+        } else {
+          cached.reactions.push({ emoji, count: 1, users: [{ id: user.id, name: user.name }] });
+        }
+      }
+      renderMessageReactions(messageId, cached.reactions);
+    }
+
+    if (socket && socket.connected) {
+      socket.emit('react_message', { messageId, emoji }, (res) => {
+        if (res && res.ok && res.reactions) {
+          if (cached) cached.reactions = res.reactions;
+          renderMessageReactions(messageId, res.reactions);
+        }
+      });
+    } else {
+      try {
+        const res = await api(`/api/messages/${messageId}/react`, {
+          method: 'POST',
+          body: JSON.stringify({ emoji }),
+        });
+        if (res && res.ok && res.reactions) {
+          if (cached) cached.reactions = res.reactions;
+          renderMessageReactions(messageId, res.reactions);
+        }
+      } catch (err) {
+        console.error('Toggle reaction error:', err);
+      }
+    }
+  }
+
+  function renderMessageReactions(messageId, reactions) {
+    const bubble = document.getElementById(`msg-bubble-${messageId}`);
+    if (!bubble) return;
+
+    let reactionsDiv = document.getElementById(`msg-reactions-${messageId}`);
+    if (!reactionsDiv) {
+      reactionsDiv = document.createElement('div');
+      reactionsDiv.className = 'msg-reactions';
+      reactionsDiv.id = `msg-reactions-${messageId}`;
+      bubble.appendChild(reactionsDiv);
+    }
+
+    reactionsDiv.replaceChildren();
+
+    if (!Array.isArray(reactions) || reactions.length === 0) {
+      reactionsDiv.hidden = true;
+      return;
+    }
+
+    reactionsDiv.hidden = false;
+    const currentUserId = state.user ? state.user.id : null;
+
+    for (const r of reactions) {
+      if (!r || r.count <= 0) continue;
+      const isUserReacted = Array.isArray(r.users) && r.users.some((u) => u.id === currentUserId);
+
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = `reaction-chip ${isUserReacted ? 'active' : ''}`;
+      chip.setAttribute('data-emoji', r.emoji);
+
+      let namesTooltip = '';
+      if (Array.isArray(r.users) && r.users.length) {
+        const names = r.users.map((u) => (u.id === currentUserId ? 'You' : u.name || 'User'));
+        namesTooltip = names.join(', ');
+      }
+      chip.title = namesTooltip || `${r.emoji} reaction`;
+
+      chip.innerHTML = `
+        <span class="reaction-emoji">${r.emoji}</span>
+        <span class="reaction-count">${r.count}</span>
+      `;
+
+      chip.onclick = (e) => {
+        e.stopPropagation();
+        toggleReaction(messageId, r.emoji);
+      };
+
+      reactionsDiv.appendChild(chip);
+    }
+  }
 
   /* ------------------------------------------------------------- friends & requests */
   async function loadFriends() {
@@ -4642,7 +5056,7 @@
   });
 
   document.addEventListener('click', (e) => {
-    if (!e.target.closest('.msg-menu-wrap') && !e.target.closest('.chat-item-menu-wrap')) {
+    if (!e.target.closest('.msg-menu-wrap') && !e.target.closest('.chat-item-menu-wrap') && !e.target.closest('.reaction-full-picker-popover')) {
       closeAllDropdowns();
     }
   });

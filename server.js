@@ -177,11 +177,21 @@ async function initDatabase() {
           UNIQUE (sender_id, receiver_id)
         );
 
+        CREATE TABLE IF NOT EXISTS chat_message_reactions (
+          id              BIGSERIAL PRIMARY KEY,
+          message_id      BIGINT NOT NULL REFERENCES chat_messages (id) ON DELETE CASCADE,
+          user_id         BIGINT NOT NULL REFERENCES chat_users (id) ON DELETE CASCADE,
+          emoji           TEXT NOT NULL,
+          created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+          UNIQUE (message_id, user_id)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_chat_messages_conv_id ON chat_messages (conversation_id, id DESC);
         CREATE INDEX IF NOT EXISTS idx_chat_conv_members_user ON chat_conversation_members (user_id);
         CREATE INDEX IF NOT EXISTS idx_chat_friends_user ON chat_friends (user_id);
         CREATE INDEX IF NOT EXISTS idx_chat_friend_requests_recv ON chat_friend_requests (receiver_id, status);
         CREATE INDEX IF NOT EXISTS idx_chat_friend_requests_sender ON chat_friend_requests (sender_id, status);
+        CREATE INDEX IF NOT EXISTS idx_chat_reactions_msg ON chat_message_reactions (message_id);
       `);
 
       try {
@@ -1414,6 +1424,44 @@ app.get('/api/conversations/:id/members', authMiddleware, async (req, res) => {
   }
 });
 
+async function getMessagesReactions(messageIds) {
+  if (!messageIds || !messageIds.length) return {};
+  const ph = messageIds.map((_, i) => `$${i + 1}`).join(', ');
+  const { rows } = await pool.query(
+    `SELECT r.message_id, r.user_id, r.emoji, u.name as user_name
+     FROM chat_message_reactions r
+     JOIN chat_users u ON r.user_id = u.id
+     WHERE r.message_id IN (${ph})
+     ORDER BY r.id ASC`,
+    messageIds
+  );
+  const map = {};
+  for (const mid of messageIds) {
+    map[mid] = [];
+  }
+  const byMsgAndEmoji = {};
+  for (const r of rows) {
+    const mid = Number(r.message_id);
+    if (!byMsgAndEmoji[mid]) byMsgAndEmoji[mid] = {};
+    if (!byMsgAndEmoji[mid][r.emoji]) {
+      byMsgAndEmoji[mid][r.emoji] = {
+        emoji: r.emoji,
+        count: 0,
+        users: [],
+      };
+    }
+    byMsgAndEmoji[mid][r.emoji].count++;
+    byMsgAndEmoji[mid][r.emoji].users.push({
+      id: Number(r.user_id),
+      name: r.user_name,
+    });
+  }
+  for (const mid of Object.keys(byMsgAndEmoji)) {
+    map[mid] = Object.values(byMsgAndEmoji[mid]);
+  }
+  return map;
+}
+
 // Messages: Load History for Conversation (filtered by user's cleared_at)
 app.get('/api/conversations/:id/messages', authMiddleware, async (req, res) => {
   try {
@@ -1505,6 +1553,9 @@ app.get('/api/conversations/:id/messages', authMiddleware, async (req, res) => {
       }
     }
 
+    const messageIds = rows.map((r) => Number(r.id));
+    const reactionsMap = await getMessagesReactions(messageIds);
+
     const messages = rows
       .map((r) => {
         let mediaList = null;
@@ -1548,6 +1599,7 @@ app.get('/api/conversations/:id/messages', authMiddleware, async (req, res) => {
           status: r.status || 'sent',
           isEdited: !!r.is_edited,
           editedAt: r.edited_at ? new Date(r.edited_at).getTime() : null,
+          reactions: reactionsMap[Number(r.id)] || [],
           ts: new Date(r.created_at).getTime(),
         };
       })
@@ -1888,6 +1940,78 @@ app.delete('/api/messages/:id', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('Delete message failed:', err);
     res.status(500).json({ ok: false, error: 'Could not delete message.' });
+  }
+});
+
+// Messages: React / Toggle emoji reaction
+app.post('/api/messages/:id/react', authMiddleware, async (req, res) => {
+  try {
+    const msgId = Number(req.params.id);
+    const emoji = String((req.body && req.body.emoji) || '').trim();
+
+    if (!msgId || !emoji) {
+      return res.status(400).json({ ok: false, error: 'Invalid message or emoji.' });
+    }
+
+    const { rows } = await pool.query(
+      'SELECT id, conversation_id, is_deleted FROM chat_messages WHERE id = $1',
+      [msgId]
+    );
+    if (!rows.length || rows[0].is_deleted) {
+      return res.status(404).json({ ok: false, error: 'Message not found.' });
+    }
+
+    const convId = Number(rows[0].conversation_id);
+    const memberCheck = await pool.query(
+      'SELECT 1 FROM chat_conversation_members WHERE conversation_id = $1 AND user_id = $2',
+      [convId, req.user.id]
+    );
+    if (!memberCheck.rows.length) {
+      return res.status(403).json({ ok: false, error: 'You are not a member of this conversation.' });
+    }
+
+    const existing = await pool.query(
+      'SELECT id, emoji FROM chat_message_reactions WHERE message_id = $1 AND user_id = $2',
+      [msgId, req.user.id]
+    );
+
+    if (existing.rows.length) {
+      if (existing.rows[0].emoji === emoji) {
+        // Toggle off
+        await pool.query(
+          'DELETE FROM chat_message_reactions WHERE message_id = $1 AND user_id = $2',
+          [msgId, req.user.id]
+        );
+      } else {
+        // Switch emoji
+        await pool.query(
+          'UPDATE chat_message_reactions SET emoji = $1, created_at = now() WHERE message_id = $2 AND user_id = $3',
+          [emoji, msgId, req.user.id]
+        );
+      }
+    } else {
+      await pool.query(
+        'INSERT INTO chat_message_reactions (message_id, user_id, emoji) VALUES ($1, $2, $3)',
+        [msgId, req.user.id, emoji]
+      );
+    }
+
+    const reactionsMap = await getMessagesReactions([msgId]);
+    const updatedReactions = reactionsMap[msgId] || [];
+
+    if (typeof io !== 'undefined') {
+      io.to(`c:${convId}`).emit('message_reaction_updated', {
+        messageId: msgId,
+        conversationId: convId,
+        userId: req.user.id,
+        reactions: updatedReactions,
+      });
+    }
+
+    res.json({ ok: true, messageId: msgId, reactions: updatedReactions });
+  } catch (err) {
+    console.error('React message failed:', err);
+    res.status(500).json({ ok: false, error: 'Failed to update reaction.' });
   }
 });
 
@@ -2358,6 +2482,7 @@ io.on('connection', async (socket) => {
         replyToSender,
         replyToText,
         status: initialStatus,
+        reactions: [],
         ts: new Date(msgRes.rows[0].created_at).getTime(),
       };
 
@@ -2442,6 +2567,77 @@ io.on('connection', async (socket) => {
     } catch (err) {
       console.error('Socket edit_message error:', err);
       reply({ ok: false, error: 'Failed to edit message.' });
+    }
+  });
+
+  // React to message (Toggle or set reaction)
+  socket.on('react_message', async (payload, ack) => {
+    const reply = typeof ack === 'function' ? ack : () => {};
+    const msgId = Number(payload && payload.messageId);
+    const emoji = String((payload && payload.emoji) || '').trim();
+
+    if (!msgId || !emoji) {
+      return reply({ ok: false, error: 'Invalid message or emoji.' });
+    }
+
+    try {
+      const { rows } = await pool.query(
+        'SELECT id, conversation_id, is_deleted FROM chat_messages WHERE id = $1',
+        [msgId]
+      );
+      if (!rows.length || rows[0].is_deleted) {
+        return reply({ ok: false, error: 'Message not found.' });
+      }
+
+      const convId = Number(rows[0].conversation_id);
+      const memberCheck = await pool.query(
+        'SELECT 1 FROM chat_conversation_members WHERE conversation_id = $1 AND user_id = $2',
+        [convId, user.id]
+      );
+      if (!memberCheck.rows.length) {
+        return reply({ ok: false, error: 'You are not a member of this conversation.' });
+      }
+
+      const existing = await pool.query(
+        'SELECT id, emoji FROM chat_message_reactions WHERE message_id = $1 AND user_id = $2',
+        [msgId, user.id]
+      );
+
+      if (existing.rows.length) {
+        if (existing.rows[0].emoji === emoji) {
+          // Toggle off
+          await pool.query(
+            'DELETE FROM chat_message_reactions WHERE message_id = $1 AND user_id = $2',
+            [msgId, user.id]
+          );
+        } else {
+          // Switch emoji
+          await pool.query(
+            'UPDATE chat_message_reactions SET emoji = $1, created_at = now() WHERE message_id = $2 AND user_id = $3',
+            [emoji, msgId, user.id]
+          );
+        }
+      } else {
+        await pool.query(
+          'INSERT INTO chat_message_reactions (message_id, user_id, emoji) VALUES ($1, $2, $3)',
+          [msgId, user.id, emoji]
+        );
+      }
+
+      const reactionsMap = await getMessagesReactions([msgId]);
+      const updatedReactions = reactionsMap[msgId] || [];
+
+      io.to(`c:${convId}`).emit('message_reaction_updated', {
+        messageId: msgId,
+        conversationId: convId,
+        userId: user.id,
+        reactions: updatedReactions,
+      });
+
+      reply({ ok: true, messageId: msgId, reactions: updatedReactions });
+    } catch (err) {
+      console.error('Socket react_message error:', err);
+      reply({ ok: false, error: 'Failed to update reaction.' });
     }
   });
 
