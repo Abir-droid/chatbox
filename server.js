@@ -1400,7 +1400,7 @@ app.get('/api/conversations/:id/members', authMiddleware, async (req, res) => {
   try {
     const convId = Number(req.params.id);
     const { rows } = await pool.query(
-      `SELECT u.id, u.name, u.phone, u.avatar_color, m.role, m.joined_at
+      `SELECT u.id, u.name, u.phone, u.avatar_color, u.avatar_url, m.role, m.joined_at
        FROM chat_conversation_members m
        JOIN chat_users u ON m.user_id = u.id
        WHERE m.conversation_id = $1
@@ -1413,6 +1413,7 @@ app.get('/api/conversations/:id/members', authMiddleware, async (req, res) => {
       name: u.name,
       phone: u.phone,
       avatarColor: u.avatar_color,
+      avatarUrl: u.avatar_url || null,
       role: u.role,
       isOnline: onlineUsers.has(Number(u.id)),
     }));
@@ -1480,21 +1481,25 @@ app.get('/api/conversations/:id/messages', authMiddleware, async (req, res) => {
     let rows;
     if (clearedAt) {
       const q = await pool.query(
-        `SELECT id, conversation_id, sender_id, sender_name, body, media_url, media_type, media_name, media_list,
-                reply_to_id, reply_to_sender, reply_to_text, status, is_edited, edited_at, created_at
-         FROM chat_messages
-         WHERE conversation_id = $1 AND is_deleted = FALSE AND created_at > $2
-         ORDER BY id DESC LIMIT 100`,
+        `SELECT m.id, m.conversation_id, m.sender_id, m.sender_name, m.body, m.media_url, m.media_type, m.media_name, m.media_list,
+                m.reply_to_id, m.reply_to_sender, m.reply_to_text, m.status, m.is_edited, m.edited_at, m.created_at,
+                u.avatar_url AS sender_avatar_url, u.avatar_color AS sender_avatar_color
+         FROM chat_messages m
+         LEFT JOIN chat_users u ON m.sender_id = u.id
+         WHERE m.conversation_id = $1 AND m.is_deleted = FALSE AND m.created_at > $2
+         ORDER BY m.id DESC LIMIT 100`,
         [convId, clearedAt]
       );
       rows = q.rows;
     } else {
       const q = await pool.query(
-        `SELECT id, conversation_id, sender_id, sender_name, body, media_url, media_type, media_name, media_list,
-                reply_to_id, reply_to_sender, reply_to_text, status, is_edited, edited_at, created_at
-         FROM chat_messages
-         WHERE conversation_id = $1 AND is_deleted = FALSE
-         ORDER BY id DESC LIMIT 100`,
+        `SELECT m.id, m.conversation_id, m.sender_id, m.sender_name, m.body, m.media_url, m.media_type, m.media_name, m.media_list,
+                m.reply_to_id, m.reply_to_sender, m.reply_to_text, m.status, m.is_edited, m.edited_at, m.created_at,
+                u.avatar_url AS sender_avatar_url, u.avatar_color AS sender_avatar_color
+         FROM chat_messages m
+         LEFT JOIN chat_users u ON m.sender_id = u.id
+         WHERE m.conversation_id = $1 AND m.is_deleted = FALSE
+         ORDER BY m.id DESC LIMIT 100`,
         [convId]
       );
       rows = q.rows;
@@ -1587,6 +1592,8 @@ app.get('/api/conversations/:id/messages', authMiddleware, async (req, res) => {
           conversationId: Number(r.conversation_id),
           senderId: Number(r.sender_id),
           senderName: r.sender_name,
+          senderAvatarUrl: r.sender_avatar_url || null,
+          senderAvatarColor: typeof r.sender_avatar_color === 'number' ? r.sender_avatar_color : 0,
           text: r.body,
           mediaUrl: r.media_url,
           mediaType: r.media_type,
@@ -2467,12 +2474,15 @@ io.on('connection', async (socket) => {
       // Unhide conversation for all members when new message arrives
       await pool.query('UPDATE chat_conversation_members SET is_hidden = FALSE WHERE conversation_id = $1', [convId]);
 
+      const latestUser = await getUserById(user.id);
       const msg = {
         id: Number(msgRes.rows[0].id),
         tempId,
         conversationId: convId,
         senderId: user.id,
-        senderName: user.name,
+        senderName: (latestUser && latestUser.name) || user.name,
+        senderAvatarUrl: latestUser ? latestUser.avatar_url : null,
+        senderAvatarColor: latestUser ? latestUser.avatar_color : 0,
         text,
         mediaUrl,
         mediaType,

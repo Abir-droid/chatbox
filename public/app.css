@@ -1920,6 +1920,7 @@ button:active {
 
 /* Floating Reaction Bar (Quick Emojis Pill inspired by screenshot) */
 .msg-reaction-bar {
+  --rx-shift-x: 0px;
   position: absolute;
   bottom: calc(100% + 8px);
   background: var(--surface);
@@ -1935,6 +1936,9 @@ button:active {
   animation: reactionPillPop 0.18s cubic-bezier(0.175, 0.885, 0.32, 1.275) both;
   user-select: none;
   white-space: nowrap;
+  max-width: calc(100vw - 16px);
+  box-sizing: border-box;
+  transform: translateX(var(--rx-shift-x, 0px));
 }
 
 .msg-row:not(.own) .msg-reaction-bar {
@@ -1948,16 +1952,28 @@ button:active {
 .msg-reaction-bar.open-down {
   bottom: auto;
   top: calc(100% + 8px);
+  animation-name: reactionPillPopDown;
 }
 
 @keyframes reactionPillPop {
   0% {
     opacity: 0;
-    transform: scale(0.65) translateY(10px);
+    transform: translateX(var(--rx-shift-x, 0px)) scale(0.65) translateY(10px);
   }
   100% {
     opacity: 1;
-    transform: scale(1) translateY(0);
+    transform: translateX(var(--rx-shift-x, 0px)) scale(1) translateY(0);
+  }
+}
+
+@keyframes reactionPillPopDown {
+  0% {
+    opacity: 0;
+    transform: translateX(var(--rx-shift-x, 0px)) scale(0.65) translateY(-10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(var(--rx-shift-x, 0px)) scale(1) translateY(0);
   }
 }
 
@@ -4504,6 +4520,24 @@ dialog.lightbox-dialog::backdrop {
   .msg-row {
     max-width: 90%;
     min-width: 0;
+  }
+  .msg-reaction-bar {
+    padding: 3px 5px;
+    gap: 2px;
+  }
+  .reaction-bar-btn {
+    width: 30px;
+    height: 30px;
+    font-size: 1.25rem;
+    padding: 2px;
+  }
+  .reaction-bar-plus {
+    width: 26px;
+    height: 26px;
+  }
+  .reaction-bar-plus svg {
+    width: 12px;
+    height: 12px;
   }
 }
 

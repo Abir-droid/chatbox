@@ -476,20 +476,27 @@
   function renderAvatar(elem, name, colorIndex, avatarUrl, isOnline) {
     if (!elem) return;
     elem.replaceChildren();
+    elem.classList.add('avatar', 'u');
+    if (isOnline) {
+      elem.classList.add('online');
+    } else {
+      elem.classList.remove('online');
+    }
+    elem.className = elem.className.replace(/\bc-\d+\b/g, '').trim();
+
     if (avatarUrl) {
-      elem.className = `avatar u ${isOnline ? 'online' : ''}`;
       const img = document.createElement('img');
       img.className = 'avatar-img';
       img.src = normalizeMediaUrl(avatarUrl);
       img.alt = name || 'Avatar';
       img.onerror = () => {
         elem.replaceChildren();
-        elem.className = `avatar u c-${(colorIndex !== undefined ? colorIndex : 0) % 10} ${isOnline ? 'online' : ''}`;
+        elem.classList.add(`c-${(colorIndex !== undefined ? colorIndex : 0) % 10}`);
         elem.textContent = (name || '?').charAt(0).toUpperCase();
       };
       elem.appendChild(img);
     } else {
-      elem.className = `avatar u c-${(colorIndex !== undefined ? colorIndex : 0) % 10} ${isOnline ? 'online' : ''}`;
+      elem.classList.add(`c-${(colorIndex !== undefined ? colorIndex : 0) % 10}`);
       elem.textContent = (name || '?').charAt(0).toUpperCase();
     }
   }
@@ -870,7 +877,8 @@
     });
 
     socket.on('user_profile_updated', ({ userId, name, avatarColor, avatarUrl }) => {
-      if (state.user && state.user.id === userId) {
+      const uId = Number(userId);
+      if (state.user && Number(state.user.id) === uId) {
         state.user.name = name;
         state.user.avatar_color = avatarColor;
         state.user.avatar_url = avatarUrl;
@@ -878,14 +886,14 @@
         renderAvatar(el.meAvatar, name, avatarColor, avatarUrl);
       }
       for (const conv of state.conversations) {
-        if (conv.otherUserId === userId) {
+        if (Number(conv.otherUserId) === uId) {
           conv.name = name;
           conv.avatarColor = avatarColor;
           conv.avatarUrl = avatarUrl;
         }
       }
       for (const f of state.friends) {
-        if (f.id === userId) {
+        if (Number(f.id) === uId) {
           f.name = name;
           f.avatarColor = avatarColor;
           f.avatarUrl = avatarUrl;
@@ -895,10 +903,37 @@
       renderFriends();
       if (state.activeConversationId) {
         const active = state.conversations.find((c) => c.id === state.activeConversationId);
-        if (active && active.otherUserId === userId) {
+        if (active && Number(active.otherUserId) === uId) {
           el.convTitle.textContent = name;
           renderAvatar(el.convAvatar, name, avatarColor, avatarUrl, active.isOnline);
+          if (el.infoAvatar && el.chatInfoPanel && el.chatInfoPanel.classList.contains('open')) {
+            renderAvatar(el.infoAvatar, name, avatarColor, avatarUrl, active.isOnline);
+            el.infoAvatar.classList.add('large');
+          }
         }
+      }
+
+      // Update message bubble avatars and authors in active chat & cache
+      for (const [msgId, m] of state.messagesCache.entries()) {
+        if (Number(m.senderId) === uId) {
+          m.senderName = name;
+          m.senderAvatarUrl = avatarUrl;
+          m.senderAvatarColor = avatarColor;
+          const row = document.getElementById(`msg-${msgId}`);
+          if (row) {
+            const bubbleAvatar = row.querySelector('.chat-bubble-avatar');
+            if (bubbleAvatar) {
+              renderAvatar(bubbleAvatar, name, avatarColor, avatarUrl);
+            }
+            const author = row.querySelector('.bubble-author');
+            if (author) author.textContent = name;
+          }
+        }
+      }
+
+      // If group members dialog is open, re-render members
+      if (el.groupMembersDialog && el.groupMembersDialog.open) {
+        loadGroupMembers();
       }
     });
 
@@ -1166,7 +1201,10 @@
   function closeAllDropdowns() {
     document.querySelectorAll('.msg-dropdown:not([hidden])').forEach((d) => (d.hidden = true));
     document.querySelectorAll('.msg-down-btn.active').forEach((b) => b.classList.remove('active'));
-    document.querySelectorAll('.msg-reaction-bar:not([hidden])').forEach((r) => (r.hidden = true));
+    document.querySelectorAll('.msg-reaction-bar:not([hidden])').forEach((r) => {
+      r.hidden = true;
+      r.style.removeProperty('--rx-shift-x');
+    });
     document.querySelectorAll('.msg-react-btn.active').forEach((b) => b.classList.remove('active'));
     document.querySelectorAll('.msg-row.show-menu').forEach((r) => r.classList.remove('show-menu'));
     document.querySelectorAll('.msg-row.hover-actions').forEach((r) => r.classList.remove('hover-actions'));
@@ -1598,6 +1636,8 @@
       }
     });
 
+    li.setAttribute('data-sender-id', msg.senderId);
+
     const activeConv = state.conversations.find((c) => c.id === (msg.conversationId || state.activeConversationId));
     const isGroup = activeConv && activeConv.type === 'group';
 
@@ -1606,7 +1646,7 @@
       if (isLastInCluster) {
         const avatar = document.createElement('span');
         avatar.className = 'avatar chat-bubble-avatar';
-        renderAvatar(avatar, msg.senderName, activeConv ? activeConv.avatarColor : 0, activeConv ? activeConv.avatarUrl : null);
+        renderAvatar(avatar, msg.senderName, msg.senderAvatarColor || 0, msg.senderAvatarUrl || null);
         li.appendChild(avatar);
       } else {
         const spacer = document.createElement('span');
@@ -1942,6 +1982,7 @@
       const willOpen = reactionBar.hidden;
       closeAllDropdowns();
       if (willOpen) {
+        reactionBar.style.removeProperty('--rx-shift-x');
         reactionBar.hidden = false;
         reactBtn.classList.add('active');
         li.classList.add('show-menu');
@@ -1949,10 +1990,40 @@
 
         reactionBar.classList.remove('open-down');
         if (el.log) {
-          const rRect = reactionBar.getBoundingClientRect();
           const lRect = el.log.getBoundingClientRect();
+          const rRect = reactionBar.getBoundingClientRect();
           if (rRect.top < lRect.top + 10) {
             reactionBar.classList.add('open-down');
+          }
+
+          // Horizontal bounds clamping: keep reaction bar completely inside visible chat area
+          const mRect = menuWrap.getBoundingClientRect();
+          const barWidth = reactionBar.offsetWidth || 268;
+          const isOwn = li.classList.contains('own');
+
+          // Natural unscaled bounds from CSS left: 0 / right: 0
+          const naturalRight = isOwn ? mRect.right : mRect.left + barWidth;
+          const naturalLeft = isOwn ? mRect.right - barWidth : mRect.left;
+
+          const minAllowedLeft = Math.max(lRect.left + 8, 8);
+          const maxAllowedRight = Math.min(lRect.right - 8, window.innerWidth - 8);
+
+          let shiftX = 0;
+          if (naturalLeft < minAllowedLeft) {
+            shiftX = minAllowedLeft - naturalLeft;
+          } else if (naturalRight > maxAllowedRight) {
+            shiftX = maxAllowedRight - naturalRight;
+          }
+
+          // Safety check: don't push past opposite boundary on very narrow viewports
+          if (naturalLeft + shiftX < minAllowedLeft) {
+            shiftX = minAllowedLeft - naturalLeft;
+          } else if (naturalRight + shiftX > maxAllowedRight) {
+            shiftX = Math.max(minAllowedLeft - naturalLeft, maxAllowedRight - naturalRight);
+          }
+
+          if (Math.abs(shiftX) > 0.5) {
+            reactionBar.style.setProperty('--rx-shift-x', `${Math.round(shiftX)}px`);
           }
         }
       }
@@ -3641,13 +3712,14 @@
 
     if (anchorBtn) {
       const rect = anchorBtn.getBoundingClientRect();
+      const minLogLeft = el.log ? Math.max(el.log.getBoundingClientRect().left + 8, 10) : 10;
       let top = rect.bottom + 8;
       let left = rect.left - 130;
 
       if (left + 330 > window.innerWidth) {
         left = window.innerWidth - 340;
       }
-      if (left < 10) left = 10;
+      if (left < minLogLeft) left = minLogLeft;
 
       if (top + 310 > window.innerHeight) {
         top = Math.max(10, rect.top - 315);
@@ -4790,6 +4862,27 @@
         el.meName.textContent = data.user.name;
         renderAvatar(el.meAvatar, data.user.name, data.user.avatar_color, data.user.avatar_url);
 
+        // Update any message bubble avatars sent by current user in active chat
+        for (const [msgId, m] of state.messagesCache.entries()) {
+          if (Number(m.senderId) === Number(data.user.id)) {
+            m.senderName = data.user.name;
+            m.senderAvatarUrl = data.user.avatar_url;
+            m.senderAvatarColor = data.user.avatar_color;
+            const row = document.getElementById(`msg-${msgId}`);
+            if (row) {
+              const bAvatar = row.querySelector('.chat-bubble-avatar');
+              if (bAvatar) {
+                renderAvatar(bAvatar, data.user.name, data.user.avatar_color, data.user.avatar_url);
+              }
+              const author = row.querySelector('.bubble-author');
+              if (author) author.textContent = data.user.name;
+            }
+          }
+        }
+        if (el.groupMembersDialog && el.groupMembersDialog.open) {
+          loadGroupMembers();
+        }
+
         el.profileDialog.close();
         toast('Profile updated successfully!');
       } catch (err) {
@@ -4906,11 +4999,12 @@
         left.className = 'member-item-left';
 
         const avatar = document.createElement('span');
-        avatar.className = `avatar c-${m.avatarColor || 0} ${m.isOnline ? 'online' : ''}`;
+        avatar.className = 'avatar';
         avatar.style.width = '32px';
         avatar.style.height = '32px';
+        avatar.style.minWidth = '32px';
         avatar.style.fontSize = '0.8rem';
-        avatar.textContent = (m.name[0] || '?').toUpperCase();
+        renderAvatar(avatar, m.name, m.avatarColor, m.avatarUrl, m.isOnline);
 
         const info = document.createElement('div');
         info.innerHTML = `<strong>${m.name}</strong> <span style="font-size:0.78rem;color:var(--muted)">(${m.phone})</span>`;
@@ -5129,6 +5223,7 @@
   el.scrim.onclick = closeRail;
 
   window.addEventListener('resize', () => {
+    closeAllDropdowns();
     updateMenuButton();
     adjustInputHeight();
   });
