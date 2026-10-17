@@ -32,6 +32,7 @@
     railSearchInput: $('rail-search-input'),
 
     navChats: $('nav-chats'),
+    navChatsBadge: $('nav-chats-badge'),
     navFriends: $('nav-friends'),
     navFriendsBadge: $('nav-friends-badge'),
     navAdmin: $('nav-admin'),
@@ -1021,14 +1022,25 @@
 
         appendMessage(msg, true);
         scrollToBottom();
-        // Active chat: notify server that user has seen this message
+        // Active chat: notify server that user has seen this message if window is focused
         if (msg.senderId !== state.user.id && socket) {
-          socket.emit('conversation_seen', { conversationId: msg.conversationId });
+          if (document.hasFocus() && !document.hidden) {
+            socket.emit('conversation_seen', { conversationId: msg.conversationId });
+          } else {
+            let conv = state.conversations.find((c) => c.id === msg.conversationId);
+            if (conv) conv.unreadCount = (conv.unreadCount || 0) + 1;
+            updateUnreadBadges();
+          }
         }
       } else {
-        // Chat not currently active: notify server that message was delivered to device
-        if (msg.senderId !== state.user.id && socket) {
-          socket.emit('message_delivered', { messageId: msg.id, conversationId: msg.conversationId });
+        // Chat not currently active: notify server that message was delivered to device and track unread
+        if (msg.senderId !== state.user.id) {
+          let conv = state.conversations.find((c) => c.id === msg.conversationId);
+          if (conv) conv.unreadCount = (conv.unreadCount || 0) + 1;
+          updateUnreadBadges();
+          if (socket) {
+            socket.emit('message_delivered', { messageId: msg.id, conversationId: msg.conversationId });
+          }
         }
       }
 
@@ -1046,6 +1058,7 @@
         };
         // Move to top of chat list
         state.conversations = [conv, ...state.conversations.filter((c) => c.id !== conv.id)];
+        updateUnreadBadges();
         renderConversations();
       } else {
         // Conversation is new or unhidden: reload conversations immediately without refresh!
@@ -1077,6 +1090,21 @@
         document.querySelectorAll('#messages .msg-row.own .msg-check-wrap').forEach((wrap) => {
           wrap.innerHTML = renderTickSvg('seen');
         });
+      }
+      if (state.user && seenBy === state.user.id) {
+        const conv = state.conversations.find((c) => c.id === conversationId);
+        if (conv) conv.unreadCount = 0;
+        updateUnreadBadges();
+        renderConversations();
+      }
+    });
+
+    socket.on('unread_count_updated', ({ conversationId, unreadCount }) => {
+      const conv = state.conversations.find((c) => c.id === conversationId);
+      if (conv) {
+        conv.unreadCount = unreadCount;
+        updateUnreadBadges();
+        renderConversations();
       }
     });
 
@@ -1191,11 +1219,45 @@
     `;
   }
 
+  function updateUnreadBadges() {
+    const totalUnread = state.conversations.reduce((acc, c) => acc + (c.unreadCount || 0), 0);
+    if (el.navChatsBadge) {
+      el.navChatsBadge.textContent = totalUnread > 99 ? '99+' : totalUnread;
+      el.navChatsBadge.hidden = totalUnread === 0;
+    }
+    if (totalUnread > 0) {
+      document.title = `(${totalUnread}) chatbox`;
+    } else {
+      document.title = 'chatbox';
+    }
+  }
+
+  async function markConversationAsRead(convId) {
+    const conv = state.conversations.find((c) => c.id === convId);
+    if (conv) conv.unreadCount = 0;
+    updateUnreadBadges();
+    renderConversations();
+    try {
+      await api(`/api/conversations/${convId}/read`, { method: 'POST' });
+    } catch (e) {}
+  }
+
+  async function markConversationAsUnread(convId) {
+    const conv = state.conversations.find((c) => c.id === convId);
+    if (conv) conv.unreadCount = Math.max(1, (conv.unreadCount || 0) + 1);
+    updateUnreadBadges();
+    renderConversations();
+    try {
+      await api(`/api/conversations/${convId}/unread`, { method: 'POST' });
+    } catch (e) {}
+  }
+
   /* ------------------------------------------------------- conversations & chats */
   async function loadConversations() {
     try {
       const data = await api('/api/conversations');
       state.conversations = data.conversations || [];
+      updateUnreadBadges();
       renderConversations();
     } catch (err) {
       console.error('Load conversations error:', err);
@@ -1272,6 +1334,9 @@
 
       topDiv.append(name, time);
 
+      const bottomDiv = document.createElement('div');
+      bottomDiv.className = 'chat-item-bottom';
+
       const snippet = document.createElement('div');
       snippet.className = 'chat-item-snippet';
       if (conv.lastMessage) {
@@ -1279,10 +1344,18 @@
       } else {
         snippet.textContent = conv.type === 'group' ? `${conv.memberCount} members` : conv.phone;
       }
+      bottomDiv.appendChild(snippet);
 
-      textDiv.append(topDiv, snippet);
+      if (conv.unreadCount > 0) {
+        const unreadSpan = document.createElement('span');
+        unreadSpan.className = 'chat-item-unread';
+        unreadSpan.textContent = conv.unreadCount > 99 ? '99+' : conv.unreadCount;
+        bottomDiv.appendChild(unreadSpan);
+      }
 
-      // Down-arrow options dropdown for conversation (Delete chat)
+      textDiv.append(topDiv, bottomDiv);
+
+      // Down-arrow options dropdown for conversation (Mark read/unread, Delete chat)
       const itemMenuWrap = document.createElement('div');
       itemMenuWrap.className = 'chat-item-menu-wrap';
 
@@ -1297,13 +1370,38 @@
       itemDropdown.className = 'chat-item-dropdown';
       itemDropdown.hidden = true;
 
+      // Option: Mark as read / Mark as unread
+      if (conv.unreadCount > 0) {
+        const markReadOption = document.createElement('button');
+        markReadOption.type = 'button';
+        markReadOption.className = 'conv-dropdown-item';
+        markReadOption.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 8.5L5 12.5L13.5 4"/><path d="M5.5 8.5L9.5 12.5L18 4"/></svg><span>Mark as read</span>';
+        markReadOption.onclick = async (e) => {
+          e.stopPropagation();
+          closeAllDropdowns();
+          await markConversationAsRead(conv.id);
+        };
+        itemDropdown.appendChild(markReadOption);
+      } else {
+        const markUnreadOption = document.createElement('button');
+        markUnreadOption.type = 'button';
+        markUnreadOption.className = 'conv-dropdown-item';
+        markUnreadOption.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" fill="currentColor"/></svg><span>Mark as unread</span>';
+        markUnreadOption.onclick = async (e) => {
+          e.stopPropagation();
+          closeAllDropdowns();
+          await markConversationAsUnread(conv.id);
+        };
+        itemDropdown.appendChild(markUnreadOption);
+      }
+
       const delChatOption = document.createElement('button');
       delChatOption.type = 'button';
       delChatOption.className = 'conv-dropdown-item danger';
       delChatOption.innerHTML = '<svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg><span>Delete Chat</span>';
       delChatOption.onclick = (e) => {
         e.stopPropagation();
-        itemDropdown.hidden = true;
+        closeAllDropdowns();
         state.activeConversationId = conv.id;
         if (el.deleteConvDialog) el.deleteConvDialog.showModal();
       };
@@ -1374,6 +1472,10 @@
     const conv = state.conversations.find((c) => c.id === convId);
     if (!conv) return;
 
+    if (conv.unreadCount > 0) {
+      conv.unreadCount = 0;
+      updateUnreadBadges();
+    }
     renderConversations();
 
     // Setup Header
@@ -1413,7 +1515,7 @@
     try {
       const data = await api(`/api/conversations/${convId}/messages`);
       const msgs = data.messages || [];
-      renderMessages(msgs);
+      renderMessages(msgs, data.firstUnreadMessageId || null);
       // Auto-repair any missing media if cached in this browser
       msgs.forEach((m) => {
         const list = m.mediaList || (m.mediaUrl ? [{ url: m.mediaUrl, missing: m.mediaMissing }] : []);
@@ -1532,7 +1634,7 @@
     });
   }
 
-  function renderMessages(messages) {
+  function renderMessages(messages, firstUnreadMessageId = null) {
     el.messages.replaceChildren();
     if (!messages.length) {
       el.emptyState.hidden = false;
@@ -1540,9 +1642,22 @@
       el.emptyText.textContent = 'Say hello to start the conversation!';
     } else {
       el.emptyState.hidden = true;
+      let unreadDividerInserted = false;
+
       for (let i = 0; i < messages.length; i++) {
         const msg = messages[i];
         state.messagesCache.set(msg.id, msg);
+
+        // Insert Unread Messages divider right before the first unread message
+        if (firstUnreadMessageId && !unreadDividerInserted && msg.id === firstUnreadMessageId) {
+          const unreadRow = document.createElement('li');
+          unreadRow.className = 'unread-divider-row';
+          unreadRow.id = 'unread-divider';
+          unreadRow.setAttribute('aria-hidden', 'true');
+          unreadRow.innerHTML = '<span class="unread-divider-line"></span><span class="unread-divider-pill">Unread Messages</span><span class="unread-divider-line"></span>';
+          el.messages.appendChild(unreadRow);
+          unreadDividerInserted = true;
+        }
 
         let isLastInCluster = true;
         if (i < messages.length - 1) {
@@ -1558,7 +1673,19 @@
 
         appendMessage(msg, isLastInCluster);
       }
-      scrollToBottom();
+
+      if (firstUnreadMessageId && unreadDividerInserted) {
+        const unreadEl = $('unread-divider');
+        if (unreadEl) {
+          setTimeout(() => {
+            unreadEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }, 60);
+        } else {
+          scrollToBottom();
+        }
+      } else {
+        scrollToBottom();
+      }
     }
   }
 
@@ -5346,6 +5473,36 @@
     updateMenuButton();
     adjustInputHeight();
   });
+
+  // Window focus & tab visibility: clear unread for active chat
+  function handleWindowFocus() {
+    if (state.activeConversationId) {
+      const conv = state.conversations.find((c) => c.id === state.activeConversationId);
+      if (conv && conv.unreadCount > 0) {
+        conv.unreadCount = 0;
+        updateUnreadBadges();
+        renderConversations();
+        if (socket) {
+          socket.emit('conversation_seen', { conversationId: state.activeConversationId });
+        }
+      }
+    }
+  }
+  window.addEventListener('focus', handleWindowFocus);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) handleWindowFocus();
+  });
+
+  // Jump to bottom button & log scroll listener
+  if (el.log && el.jump) {
+    el.log.addEventListener('scroll', () => {
+      const distFromBottom = el.log.scrollHeight - el.log.scrollTop - el.log.clientHeight;
+      el.jump.hidden = distFromBottom <= 160;
+    });
+    el.jump.onclick = () => {
+      scrollToBottom();
+    };
+  }
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {

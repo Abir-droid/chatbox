@@ -956,6 +956,34 @@ button:active {
   overflow: hidden;
   text-overflow: ellipsis;
   margin-top: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-item-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 2px;
+}
+
+.chat-item-unread {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #ffffff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  flex-shrink: 0;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.4);
+  animation: popIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 /* Avatars */
@@ -2464,6 +2492,47 @@ button:active {
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   transition: background 0.15s ease, color 0.15s ease;
+}
+
+/* In-Chat Unread Messages Divider */
+.unread-divider-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  margin: 0.85rem 0;
+  position: relative;
+  user-select: none;
+  pointer-events: none;
+  list-style: none;
+  animation: fadeIn 0.25s ease;
+}
+
+.unread-divider-line {
+  flex: 1;
+  height: 1px;
+  background: var(--accent);
+  opacity: 0.45;
+}
+
+.unread-divider-pill {
+  padding: 0.25rem 0.85rem;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  border-radius: 999px;
+  margin: 0 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  box-shadow: 0 1px 4px rgba(37, 99, 235, 0.12);
+  line-height: 1.35;
+}
+
+#nav-chats-badge {
+  background: var(--accent);
+  color: #ffffff;
 }
 
 /* Jump to bottom */

@@ -165,6 +165,7 @@ async function initDatabase() {
         ALTER TABLE chat_users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
         ALTER TABLE chat_conversation_members ADD COLUMN IF NOT EXISTS cleared_at TIMESTAMPTZ;
         ALTER TABLE chat_conversation_members ADD COLUMN IF NOT EXISTS is_hidden BOOLEAN NOT NULL DEFAULT FALSE;
+        ALTER TABLE chat_conversation_members ADD COLUMN IF NOT EXISTS last_read_message_id BIGINT DEFAULT 0;
         ALTER TABLE chat_conversations ADD COLUMN IF NOT EXISTS avatar_url TEXT;
 
         CREATE TABLE IF NOT EXISTS chat_friend_requests (
@@ -206,6 +207,17 @@ async function initDatabase() {
       // Permanently clear all accumulated ("jomanu") deleted messages
       try {
         await pool.query('DELETE FROM chat_messages WHERE is_deleted = TRUE');
+      } catch (err) {}
+
+      // Initialize last_read_message_id for existing conversation members if needed
+      try {
+        await pool.query(`
+          UPDATE chat_conversation_members m
+          SET last_read_message_id = COALESCE((
+            SELECT MAX(id) FROM chat_messages WHERE conversation_id = m.conversation_id AND (status = 'seen' OR sender_id = m.user_id)
+          ), 0)
+          WHERE m.last_read_message_id IS NULL OR m.last_read_message_id = 0;
+        `);
       } catch (err) {}
 
       // Normalize existing Bangladesh phone numbers to 11 digits without country code
@@ -1018,7 +1030,7 @@ app.post('/api/friends/requests/:id/decline', authMiddleware, async (req, res) =
 app.get('/api/conversations', authMiddleware, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT c.id, c.type, c.name, c.avatar_url, c.created_at, c.updated_at, m.cleared_at, m.is_hidden
+      `SELECT c.id, c.type, c.name, c.avatar_url, c.created_at, c.updated_at, m.cleared_at, m.is_hidden, m.last_read_message_id
        FROM chat_conversations c
        JOIN chat_conversation_members m ON c.id = m.conversation_id
        WHERE m.user_id = $1
@@ -1055,6 +1067,25 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
       // If hidden and no new messages arrived after cleared_at, omit from list
       if (isHidden && !lastMsgRes.rows.length) {
         continue;
+      }
+
+      // Calculate unread count for current user
+      const lastReadId = Number(conv.last_read_message_id) || 0;
+      let unreadCount = 0;
+      if (clearedAt) {
+        const unreadRes = await pool.query(
+          `SELECT count(*)::int as count FROM chat_messages
+           WHERE conversation_id = $1 AND id > $2 AND sender_id != $3 AND is_deleted = FALSE AND created_at > $4`,
+          [convId, lastReadId, req.user.id, clearedAt]
+        );
+        unreadCount = unreadRes.rows[0].count;
+      } else {
+        const unreadRes = await pool.query(
+          `SELECT count(*)::int as count FROM chat_messages
+           WHERE conversation_id = $1 AND id > $2 AND sender_id != $3 AND is_deleted = FALSE`,
+          [convId, lastReadId, req.user.id]
+        );
+        unreadCount = unreadRes.rows[0].count;
       }
 
       let displayName = conv.name;
@@ -1112,6 +1143,8 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
         memberCount,
         isOnline,
         lastMessage,
+        unreadCount: Number(unreadCount) || 0,
+        lastReadMessageId: lastReadId,
         updatedAt: new Date(conv.updated_at).getTime(),
       });
     }
@@ -1225,6 +1258,81 @@ app.delete('/api/conversations/:id', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('Delete conversation error:', err);
     res.status(500).json({ ok: false, error: 'Could not delete conversation.' });
+  }
+});
+
+// Conversations: Mark as Read
+app.post('/api/conversations/:id/read', authMiddleware, async (req, res) => {
+  try {
+    const convId = Number(req.params.id);
+    const maxMsg = await pool.query(
+      'SELECT COALESCE(MAX(id), 0) as max_id FROM chat_messages WHERE conversation_id = $1',
+      [convId]
+    );
+    const maxId = Number(maxMsg.rows[0].max_id);
+
+    await pool.query(
+      'UPDATE chat_conversation_members SET last_read_message_id = $1 WHERE conversation_id = $2 AND user_id = $3',
+      [maxId, convId, req.user.id]
+    );
+
+    // Also mark others' messages as seen
+    const seenRes = await pool.query(
+      "UPDATE chat_messages SET status = 'seen' WHERE conversation_id = $1 AND sender_id != $2 AND status != 'seen'",
+      [convId, req.user.id]
+    );
+    if (seenRes.rowCount > 0 && typeof io !== 'undefined') {
+      io.to(`c:${convId}`).emit('conversation_seen', { conversationId: convId, seenBy: req.user.id });
+    }
+
+    if (typeof io !== 'undefined') {
+      io.to(`u:${req.user.id}`).emit('unread_count_updated', { conversationId: convId, unreadCount: 0 });
+    }
+
+    res.json({ ok: true, conversationId: convId, unreadCount: 0 });
+  } catch (err) {
+    console.error('Mark read failed:', err);
+    res.status(500).json({ ok: false, error: 'Could not mark conversation as read.' });
+  }
+});
+
+// Conversations: Mark as Unread
+app.post('/api/conversations/:id/unread', authMiddleware, async (req, res) => {
+  try {
+    const convId = Number(req.params.id);
+
+    // Find the latest message from someone else in this conversation
+    const lastOtherMsg = await pool.query(
+      'SELECT id FROM chat_messages WHERE conversation_id = $1 AND sender_id != $2 AND is_deleted = FALSE ORDER BY id DESC LIMIT 1',
+      [convId, req.user.id]
+    );
+
+    let targetReadId = 0;
+    if (lastOtherMsg.rows.length) {
+      targetReadId = Number(lastOtherMsg.rows[0].id) - 1;
+      if (targetReadId < 0) targetReadId = 0;
+    }
+
+    await pool.query(
+      'UPDATE chat_conversation_members SET last_read_message_id = $1 WHERE conversation_id = $2 AND user_id = $3',
+      [targetReadId, convId, req.user.id]
+    );
+
+    const unreadRes = await pool.query(
+      `SELECT count(*)::int as count FROM chat_messages
+       WHERE conversation_id = $1 AND id > $2 AND sender_id != $3 AND is_deleted = FALSE`,
+      [convId, targetReadId, req.user.id]
+    );
+    const unreadCount = Number(unreadRes.rows[0].count) || 1;
+
+    if (typeof io !== 'undefined') {
+      io.to(`u:${req.user.id}`).emit('unread_count_updated', { conversationId: convId, unreadCount });
+    }
+
+    res.json({ ok: true, conversationId: convId, unreadCount });
+  } catch (err) {
+    console.error('Mark unread failed:', err);
+    res.status(500).json({ ok: false, error: 'Could not mark conversation as unread.' });
   }
 });
 
@@ -1468,15 +1576,16 @@ app.get('/api/conversations/:id/messages', authMiddleware, async (req, res) => {
   try {
     const convId = Number(req.params.id);
 
-    // Verify membership and fetch cleared_at
+    // Verify membership and fetch cleared_at and last_read_message_id
     const memberCheck = await pool.query(
-      'SELECT cleared_at FROM chat_conversation_members WHERE conversation_id = $1 AND user_id = $2',
+      'SELECT cleared_at, last_read_message_id FROM chat_conversation_members WHERE conversation_id = $1 AND user_id = $2',
       [convId, req.user.id]
     );
     if (!memberCheck.rows.length) {
       return res.status(403).json({ ok: false, error: 'You are not a member of this conversation.' });
     }
 
+    const userLastReadMessageId = Number(memberCheck.rows[0].last_read_message_id) || 0;
     const clearedAt = memberCheck.rows[0].cleared_at ? new Date(memberCheck.rows[0].cleared_at) : null;
     let rows;
     if (clearedAt) {
@@ -1612,7 +1721,22 @@ app.get('/api/conversations/:id/messages', authMiddleware, async (req, res) => {
       })
       .reverse();
 
-    res.json({ ok: true, messages });
+    const unreadMsgs = messages.filter((m) => m.id > userLastReadMessageId && m.senderId !== req.user.id);
+    const firstUnreadMessageId = unreadMsgs.length > 0 ? unreadMsgs[0].id : null;
+
+    // Update last_read_message_id to latest message id for current user
+    const latestMsgId = messages.length > 0 ? messages[messages.length - 1].id : 0;
+    if (latestMsgId > 0) {
+      await pool.query(
+        'UPDATE chat_conversation_members SET last_read_message_id = GREATEST(COALESCE(last_read_message_id, 0), $1) WHERE conversation_id = $2 AND user_id = $3',
+        [latestMsgId, convId, req.user.id]
+      );
+      if (typeof io !== 'undefined') {
+        io.to(`u:${req.user.id}`).emit('unread_count_updated', { conversationId: convId, unreadCount: 0 });
+      }
+    }
+
+    res.json({ ok: true, messages, firstUnreadMessageId, lastReadMessageId: userLastReadMessageId });
   } catch (err) {
     console.error('Load messages failed:', err);
     res.status(500).json({ ok: false, error: 'Could not load messages.' });
@@ -2685,6 +2809,18 @@ io.on('connection', async (socket) => {
     const convId = Number(conversationId);
     if (!convId) return;
     try {
+      const maxMsg = await pool.query(
+        'SELECT COALESCE(MAX(id), 0) as max_id FROM chat_messages WHERE conversation_id = $1',
+        [convId]
+      );
+      const maxId = Number(maxMsg.rows[0].max_id);
+      if (maxId > 0) {
+        await pool.query(
+          'UPDATE chat_conversation_members SET last_read_message_id = GREATEST(COALESCE(last_read_message_id, 0), $1) WHERE conversation_id = $2 AND user_id = $3',
+          [maxId, convId, user.id]
+        );
+      }
+
       const res = await pool.query(
         "UPDATE chat_messages SET status = 'seen' WHERE conversation_id = $1 AND sender_id != $2 AND status != 'seen'",
         [convId, user.id]
@@ -2692,6 +2828,7 @@ io.on('connection', async (socket) => {
       if (res.rowCount > 0) {
         io.to(`c:${convId}`).emit('conversation_seen', { conversationId: convId, seenBy: user.id });
       }
+      io.to(`u:${user.id}`).emit('unread_count_updated', { conversationId: convId, unreadCount: 0 });
     } catch (e) {}
   });
 
