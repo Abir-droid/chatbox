@@ -997,19 +997,23 @@
         const currentConv = state.conversations.find((c) => c.id === msg.conversationId);
         const isGroup = currentConv && currentConv.type === 'group';
 
-        // In group chats, if previous message was from same sender within 1 minute, swap its avatar to an avatar-spacer
+        // In group chats, if previous message was from same sender within 1 minute on the same day, swap its avatar to an avatar-spacer
         if (isGroup) {
-          const lastRow = el.messages.lastElementChild;
+          const lastRow = getLastMessageRow();
           if (lastRow && !lastRow.classList.contains('system') && !lastRow.classList.contains('own')) {
-            const lastMsgId = Number(lastRow.id.replace('msg-', ''));
-            const lastMsg = state.messagesCache.get(lastMsgId);
-            if (lastMsg && lastMsg.senderId === msg.senderId && Math.abs(msg.ts - lastMsg.ts) < 60000) {
-              const oldAvatar = lastRow.querySelector('.chat-bubble-avatar');
-              if (oldAvatar) {
-                const spacer = document.createElement('span');
-                spacer.className = 'avatar-spacer';
-                spacer.setAttribute('aria-hidden', 'true');
-                oldAvatar.replaceWith(spacer);
+            const lastDateKey = lastRow.getAttribute('data-date-key');
+            const msgDateKey = getDateKey(msg.ts || Date.now());
+            if (lastDateKey === msgDateKey) {
+              const lastMsgId = Number(lastRow.id.replace('msg-', ''));
+              const lastMsg = state.messagesCache.get(lastMsgId);
+              if (lastMsg && lastMsg.senderId === msg.senderId && Math.abs(msg.ts - lastMsg.ts) < 60000) {
+                const oldAvatar = lastRow.querySelector('.chat-bubble-avatar');
+                if (oldAvatar) {
+                  const spacer = document.createElement('span');
+                  spacer.className = 'avatar-spacer';
+                  spacer.setAttribute('aria-hidden', 'true');
+                  oldAvatar.replaceWith(spacer);
+                }
               }
             }
           }
@@ -1435,6 +1439,99 @@
     }
   }
 
+  function getDateKey(ts) {
+    if (!ts) return '';
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return '';
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  function formatChatDate(ts) {
+    if (!ts) return '';
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return '';
+    const now = new Date();
+
+    const isToday = d.toDateString() === now.toDateString();
+    if (isToday) return 'Today';
+
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
+
+    const isCurrentYear = d.getFullYear() === now.getFullYear();
+    if (isCurrentYear) {
+      return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+    }
+    return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  }
+
+  function getLastMessageRow() {
+    const rows = el.messages ? el.messages.querySelectorAll('.msg-row') : [];
+    return rows.length > 0 ? rows[rows.length - 1] : null;
+  }
+
+  function ensureDateSeparator(ts) {
+    const msgDateKey = getDateKey(ts);
+    if (!msgDateKey || !el.messages) return;
+
+    const lastRow = getLastMessageRow();
+    let needSeparator = false;
+
+    if (!lastRow) {
+      needSeparator = true;
+    } else {
+      const lastDateKey = lastRow.getAttribute('data-date-key');
+      if (lastDateKey && lastDateKey !== msgDateKey) {
+        needSeparator = true;
+      }
+    }
+
+    if (needSeparator) {
+      const dateRow = document.createElement('li');
+      dateRow.className = 'chat-date-row';
+      dateRow.setAttribute('data-date-key', msgDateKey);
+      dateRow.setAttribute('aria-hidden', 'true');
+
+      const dateBadge = document.createElement('div');
+      dateBadge.className = 'chat-date-badge';
+      dateBadge.textContent = formatChatDate(ts);
+
+      const d = new Date(ts);
+      if (!isNaN(d.getTime())) {
+        dateBadge.title = d.toLocaleDateString('en-US', {
+          weekday: 'long',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+        });
+      }
+
+      dateRow.appendChild(dateBadge);
+      el.messages.appendChild(dateRow);
+    }
+  }
+
+  function cleanupDateSeparators() {
+    if (!el.messages) return;
+    const dateRows = el.messages.querySelectorAll('.chat-date-row');
+    dateRows.forEach((dRow) => {
+      let next = dRow.nextElementSibling;
+      let hasMessages = false;
+      while (next) {
+        if (next.classList.contains('chat-date-row')) break;
+        if (next.classList.contains('msg-row')) {
+          hasMessages = true;
+          break;
+        }
+        next = next.nextElementSibling;
+      }
+      if (!hasMessages) {
+        dRow.remove();
+      }
+    });
+  }
+
   function renderMessages(messages) {
     el.messages.replaceChildren();
     if (!messages.length) {
@@ -1453,7 +1550,8 @@
           const sameSender = nextMsg.senderId === msg.senderId;
           const nextNotSystem = nextMsg.senderName !== 'System';
           const sameMinute = Math.abs(nextMsg.ts - msg.ts) < 60000;
-          if (sameSender && nextNotSystem && sameMinute) {
+          const sameDay = getDateKey(nextMsg.ts) === getDateKey(msg.ts);
+          if (sameSender && nextNotSystem && sameMinute && sameDay) {
             isLastInCluster = false;
           }
         }
@@ -1476,7 +1574,8 @@
       row.classList.add('pop-deleting');
       setTimeout(() => {
         row.remove();
-        if (el.messages && el.messages.children.length === 0) {
+        cleanupDateSeparators();
+        if (el.messages && el.messages.querySelectorAll('.msg-row').length === 0) {
           el.emptyState.hidden = false;
         }
       }, 240);
@@ -1596,10 +1695,12 @@
 
     const isOwn = msg.senderId === state.user.id;
     const isSystem = msg.senderName === 'System';
+    const msgDateKey = getDateKey(msg.ts || Date.now());
 
     const li = document.createElement('li');
     li.className = `msg-row ${isOwn ? 'own' : ''} ${isSystem ? 'system' : ''}`;
     li.id = `msg-${msg.id}`;
+    if (msgDateKey) li.setAttribute('data-date-key', msgDateKey);
 
     if (state.selectedMessageIds.has(msg.id)) {
       li.classList.add('selected');
@@ -1613,6 +1714,7 @@
       if (existingOptRow) {
         existingOptRow.replaceWith(li);
       } else {
+        ensureDateSeparator(msg.ts || Date.now());
         el.messages.appendChild(li);
       }
       return;
@@ -2309,6 +2411,7 @@
     if (existingOptRow) {
       existingOptRow.replaceWith(li);
     } else {
+      ensureDateSeparator(msg.ts || Date.now());
       el.messages.appendChild(li);
     }
   }

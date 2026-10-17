@@ -79,6 +79,11 @@
   --bubble-other-ink: #0f172a;
   --bubble-other-line: rgba(226, 232, 240, 0.45);
   --bubble-other-shadow: 0 1px 4px rgba(15, 23, 42, 0.03);
+
+  /* Date badge in chat stream */
+  --date-badge-bg: rgba(15, 23, 42, 0.08);
+  --date-badge-ink: #334155;
+  --date-badge-border: rgba(15, 23, 42, 0.06);
 }
 
 [data-theme="dark"] {
@@ -140,6 +145,11 @@
   --bubble-other-ink: #f8fafc;
   --bubble-other-line: rgba(255, 255, 255, 0.06);
   --bubble-other-shadow: 0 1px 6px rgba(0, 0, 0, 0.25);
+
+  /* Date badge in chat stream */
+  --date-badge-bg: rgba(18, 28, 45, 0.75);
+  --date-badge-ink: #ffffff;
+  --date-badge-border: rgba(255, 255, 255, 0.08);
 }
 
 /* ------------------------------------------------------------------- base reset */
@@ -2422,6 +2432,38 @@ button:active {
   border: 1px solid var(--line);
   border-radius: 999px;
   font-weight: 500;
+}
+
+/* Date separator in middle of chat (Telegram style) */
+.chat-date-row {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  margin: 0.65rem 0;
+  pointer-events: none;
+  user-select: none;
+  list-style: none;
+}
+
+.chat-date-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-body);
+  font-size: 0.78rem;
+  font-weight: 500;
+  padding: 0.28rem 0.95rem;
+  border-radius: 9999px;
+  background: var(--date-badge-bg);
+  color: var(--date-badge-ink);
+  border: 1px solid var(--date-badge-border);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.14);
+  letter-spacing: 0.01em;
+  line-height: 1.35;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 /* Jump to bottom */
