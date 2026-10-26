@@ -5627,6 +5627,165 @@ dialog.lightbox-dialog::backdrop {
   font-size: 0.9rem;
 }
 
+/* ------------------------------------------------------------- Inline Document / File Bubble in Messages */
+.msg-file-bubble {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.18);
+  cursor: pointer;
+  transition: background 0.15s ease;
+  min-width: 200px;
+  max-width: 320px;
+  margin-bottom: 4px;
+}
+
+.msg-file-bubble:hover {
+  background: rgba(56, 189, 248, 0.15);
+}
+
+.msg-file-icon-wrap {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  background: rgba(56, 189, 248, 0.18);
+  color: #38bdf8;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.msg-file-icon-wrap svg {
+  width: 22px;
+  height: 22px;
+}
+
+.msg-file-ext {
+  font-size: 0.52rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  color: #38bdf8;
+  text-transform: uppercase;
+  margin-top: -2px;
+  max-width: 36px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.msg-file-details {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.msg-file-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--bubble-ink, var(--rail-ink));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.msg-file-size {
+  font-size: 0.72rem;
+  color: var(--bubble-sub, var(--rail-muted));
+}
+
+.msg-file-download-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(56, 189, 248, 0.18);
+  color: #38bdf8;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.msg-file-download-btn:hover {
+  background: rgba(56, 189, 248, 0.35);
+  transform: scale(1.08);
+}
+
+.msg-file-download-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.bubble.has-file {
+  padding-bottom: 2px;
+}
+
+/* Own file bubbles */
+.msg-row.own .msg-file-bubble {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.msg-row.own .msg-file-bubble:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.msg-row.own .msg-file-icon-wrap {
+  background: rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.msg-row.own .msg-file-ext {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.msg-row.own .msg-file-download-btn {
+  background: rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.msg-row.own .msg-file-download-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Light theme overrides for file bubble */
+[data-theme="light"] .msg-file-bubble {
+  background: rgba(14, 165, 233, 0.06);
+  border-color: rgba(14, 165, 233, 0.15);
+}
+
+[data-theme="light"] .msg-file-bubble:hover {
+  background: rgba(14, 165, 233, 0.12);
+}
+
+[data-theme="light"] .msg-file-icon-wrap {
+  background: rgba(14, 165, 233, 0.12);
+  color: #0ea5e9;
+}
+
+[data-theme="light"] .msg-file-ext {
+  color: #0ea5e9;
+}
+
+[data-theme="light"] .msg-file-download-btn {
+  background: rgba(14, 165, 233, 0.12);
+  color: #0ea5e9;
+}
+
+[data-theme="light"] .msg-file-download-btn:hover {
+  background: rgba(14, 165, 233, 0.25);
+}
+
 /* ------------------------------------------------------------- Lightbox Navigation Chevrons */
 .lightbox-nav-btn {
   position: fixed;

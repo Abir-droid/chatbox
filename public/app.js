@@ -1046,7 +1046,7 @@
 
       const displayText = msg.mediaType === 'audio'
         ? '🎤 Voice note'
-        : (msg.mediaType === 'image' ? '📷 Photo' : (msg.mediaType === 'video' ? '🎥 Video' : msg.text));
+        : (msg.mediaType === 'image' ? '📷 Photo' : (msg.mediaType === 'video' ? '🎥 Video' : (msg.mediaType === 'file' ? '📎 ' + (msg.mediaName || 'Document') : msg.text)));
 
       // Update sidebar preview
       let conv = state.conversations.find((c) => c.id === msg.conversationId);
@@ -1949,15 +1949,61 @@
 
     const isUploading = msg.status === 'uploading';
 
-    if (rawMediaList.length > 1) {
-      if (!msg.text) {
+    const visualItems = [];
+    const fileItems = [];
+    const audioItems = [];
+
+    rawMediaList.forEach((item) => {
+      if (!item || !item.url) return;
+      const rawType = (item.mediaType || '').toLowerCase();
+      const mediaUrl = item.url || '';
+      const mediaName = (item.mediaName || '').toLowerCase();
+
+      const isAudio =
+        rawType === 'audio' ||
+        rawType.startsWith('audio/') ||
+        mediaName.includes('voice note') ||
+        /\.(webm|ogg|wav|mp3|m4a|aac|opus)(\?|$)/i.test(mediaUrl);
+
+      const isVideo =
+        !isAudio &&
+        (rawType === 'video' ||
+         rawType.startsWith('video/') ||
+         /\.(mp4|mov|mkv)(\?|$)/i.test(mediaUrl));
+
+      const isImage =
+        !isAudio && !isVideo &&
+        (rawType === 'image' ||
+         rawType.startsWith('image/') ||
+         /\.(jpg|jpeg|png|gif|webp|svg|bmp|ico|heic|heif)(\?|$)/i.test(mediaUrl));
+
+      if (isAudio) {
+        audioItems.push(item);
+      } else if (isImage || isVideo) {
+        visualItems.push({ ...item, isVideo });
+      } else {
+        fileItems.push(item);
+      }
+    });
+
+    if (fileItems.length > 0) {
+      bubble.classList.add('has-file');
+    }
+    if (visualItems.length > 0) {
+      if (!msg.text && fileItems.length === 0 && audioItems.length === 0) {
         bubble.classList.add('has-media-only');
       } else {
         bubble.classList.add('has-media');
       }
+    }
+    if (audioItems.length > 0) {
+      bubble.classList.add('has-audio');
+    }
 
+    // 1. Render Visual Items (Images & Videos)
+    if (visualItems.length > 1) {
       const collage = document.createElement('div');
-      const count = rawMediaList.length;
+      const count = visualItems.length;
       if (count === 2) {
         collage.className = 'msg-media-collage collage-2';
       } else if (count === 3) {
@@ -1970,17 +2016,14 @@
         collage.classList.add('uploading-skeleton');
       }
 
-      const displayItems = rawMediaList.slice(0, 4);
+      const displayItems = visualItems.slice(0, 4);
       const remaining = count - 4;
 
       displayItems.forEach((item, index) => {
         const itemEl = document.createElement('div');
         itemEl.className = 'collage-item';
 
-        const rawType = (item.mediaType || '').toLowerCase();
-        const isVid = rawType === 'video' || rawType.startsWith('video/') || /\.(mp4|mov|mkv)(\?|$)/i.test(item.url);
-
-        if (isVid) {
+        if (item.isVideo) {
           const video = document.createElement('video');
           video.src = normalizeMediaUrl(item.url);
           video.preload = 'metadata';
@@ -2023,7 +2066,7 @@
         itemEl.onclick = (e) => {
           e.stopPropagation();
           if (!isUploading) {
-            openLightbox(item);
+            openLightbox(item, visualItems);
           }
         };
 
@@ -2031,60 +2074,22 @@
       });
 
       bubble.appendChild(collage);
-    } else if (rawMediaList.length === 1) {
-      const singleItem = rawMediaList[0];
+    } else if (visualItems.length === 1) {
+      const singleItem = visualItems[0];
       const mediaUrl = singleItem.url;
-      const rawType = (singleItem.mediaType || '').toLowerCase();
-      const mediaName = (singleItem.mediaName || '').toLowerCase();
-
-      const isAudio =
-        rawType === 'audio' ||
-        rawType.startsWith('audio/') ||
-        mediaName.includes('voice note') ||
-        /\.(webm|ogg|wav|mp3|m4a|aac|opus)(\?|$)/i.test(mediaUrl);
-
-      const isVideo =
-        !isAudio &&
-        (rawType === 'video' ||
-         rawType.startsWith('video/') ||
-         /\.(mp4|mov|mkv)(\?|$)/i.test(mediaUrl));
-
       const mediaDiv = document.createElement('div');
+      mediaDiv.className = 'msg-media';
       if (isUploading) {
         mediaDiv.classList.add('uploading-skeleton');
       }
 
-      if (isAudio) {
-        bubble.classList.add('has-audio');
-        mediaDiv.className = 'msg-media msg-audio';
-        const header = document.createElement('div');
-        header.className = 'voice-bubble-header';
-        header.innerHTML = '<svg viewBox="0 0 24 24" class="voice-bubble-icon" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg><span>Voice Note</span>';
-
-        const audio = document.createElement('audio');
-        audio.src = normalizeMediaUrl(mediaUrl);
-        audio.controls = true;
-        audio.preload = 'metadata';
-        mediaDiv.append(header, audio);
-      } else if (isVideo) {
-        if (!msg.text) {
-          bubble.classList.add('has-media-only');
-        } else {
-          bubble.classList.add('has-media');
-        }
-        mediaDiv.className = 'msg-media';
+      if (singleItem.isVideo) {
         const video = document.createElement('video');
         video.src = normalizeMediaUrl(mediaUrl);
         video.controls = true;
         video.preload = 'metadata';
         mediaDiv.appendChild(video);
       } else {
-        if (!msg.text) {
-          bubble.classList.add('has-media-only');
-        } else {
-          bubble.classList.add('has-media');
-        }
-        mediaDiv.className = 'msg-media';
         const img = document.createElement('img');
         img.src = normalizeMediaUrl(mediaUrl);
         img.alt = singleItem.mediaName || 'Photo';
@@ -2097,7 +2102,7 @@
           if (singleItem.missing) repairIfCached(singleItem, img);
         };
         img.onclick = () => {
-          if (!isUploading) openLightbox(singleItem);
+          if (!isUploading) openLightbox(singleItem, [singleItem]);
         };
         mediaDiv.appendChild(img);
       }
@@ -2111,6 +2116,72 @@
 
       bubble.appendChild(mediaDiv);
     }
+
+    // 2. Render Audio Items
+    audioItems.forEach((audioItem) => {
+      const audioDiv = document.createElement('div');
+      audioDiv.className = 'msg-media msg-audio';
+      if (isUploading) audioDiv.classList.add('uploading-skeleton');
+
+      const header = document.createElement('div');
+      header.className = 'voice-bubble-header';
+      header.innerHTML = '<svg viewBox="0 0 24 24" class="voice-bubble-icon" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg><span>Voice Note</span>';
+
+      const audio = document.createElement('audio');
+      audio.src = normalizeMediaUrl(audioItem.url);
+      audio.controls = true;
+      audio.preload = 'metadata';
+      audioDiv.append(header, audio);
+
+      if (isUploading) {
+        const spin = document.createElement('div');
+        spin.className = 'upload-spinner-wrap';
+        spin.innerHTML = '<div class="upload-spinner-ring"></div><span class="upload-spinner-label">Uploading…</span>';
+        audioDiv.appendChild(spin);
+      }
+
+      bubble.appendChild(audioDiv);
+    });
+
+    // 3. Render Document / File Items
+    fileItems.forEach((fileItem) => {
+      const fileDiv = document.createElement('div');
+      fileDiv.className = 'msg-file-bubble';
+      if (isUploading) {
+        fileDiv.classList.add('uploading-skeleton');
+      }
+
+      const displayName = fileItem.mediaName || 'Document';
+      const ext = displayName.includes('.') ? displayName.split('.').pop().toUpperCase() : 'FILE';
+      const sizeText = fileItem.size ? `${(fileItem.size / (1024 * 1024)).toFixed(1)} MB` : `${ext} file`;
+
+      fileDiv.innerHTML = `
+        <div class="msg-file-icon-wrap">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+          <span class="msg-file-ext">${escapeHtml(ext)}</span>
+        </div>
+        <div class="msg-file-details">
+          <span class="msg-file-name" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</span>
+          <span class="msg-file-size">${sizeText}</span>
+        </div>
+        <button type="button" class="msg-file-download-btn" title="${isUploading ? 'Uploading…' : 'Download'}" aria-label="Download file">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </button>
+      `;
+
+      const dlBtn = fileDiv.querySelector('.msg-file-download-btn');
+      if (dlBtn) {
+        dlBtn.onclick = (ev) => {
+          ev.stopPropagation();
+          downloadMediaFile(fileItem.url, displayName);
+        };
+      }
+      fileDiv.onclick = () => {
+        if (!isUploading) downloadMediaFile(fileItem.url, displayName);
+      };
+
+      bubble.appendChild(fileDiv);
+    });
 
     if (msg.text) {
       const textP = document.createElement('p');
@@ -2600,8 +2671,12 @@
         if (file.type && file.type.startsWith('image/')) {
           const url = URL.createObjectURL(file);
           chip.style.backgroundImage = `url(${url})`;
+        } else if (file.type && file.type.startsWith('video/')) {
+          chip.textContent = '🎥';
+        } else if (file.type && file.type.startsWith('audio/')) {
+          chip.textContent = '🎵';
         } else {
-          chip.textContent = file.type && file.type.startsWith('video/') ? '🎥' : (file.type && file.type.startsWith('audio/') ? '🎵' : '📁');
+          chip.textContent = '📄';
         }
 
         const removeBtn = document.createElement('button');
@@ -2945,12 +3020,13 @@
         ? msg.mediaList
         : (msg.mediaUrl || msg.media_url ? [{ url: msg.mediaUrl || msg.media_url, mediaType: msg.mediaType || msg.media_type }] : []);
       if (rawMediaList.length > 1) {
-        snippet = `${rawMediaList.length} Photos/Videos`;
+        snippet = `${rawMediaList.length} files`;
       } else {
         const type = (msg.mediaType || msg.media_type || (rawMediaList[0] && rawMediaList[0].mediaType) || '').toLowerCase();
         if (type === 'audio') snippet = 'Voice note';
         else if (type === 'image') snippet = 'Photo';
         else if (type === 'video') snippet = 'Video';
+        else if (type === 'file') snippet = msg.mediaName || (rawMediaList[0] && rawMediaList[0].mediaName) || 'Document';
         else snippet = 'Attachment';
       }
     }
@@ -3020,7 +3096,8 @@
         for (const item of msg.mediaList) {
           if (!item || !item.url || seen.has(item.url)) continue;
           const isAudio = (item.mediaType && item.mediaType.startsWith('audio/')) || /\.(webm|ogg|wav|mp3|m4a|aac|opus)(\?|$)/i.test(item.url);
-          if (!isAudio) {
+          const isDoc = item.mediaType === 'file' || /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|rtf|zip|rar|7z|gz|tar|json|xml|html|css|js|apk)(\?|$)/i.test(item.url);
+          if (!isAudio && !isDoc) {
             seen.add(item.url);
             list.push({
               url: item.url,
@@ -3036,7 +3113,8 @@
         const mt = (msg.mediaType || msg.media_type || '').toLowerCase();
         const mn = (msg.mediaName || msg.media_name || '').toLowerCase();
         const isAudio = mt.startsWith('audio/') || mn.includes('voice note') || /\.(webm|ogg|wav|mp3|m4a|aac|opus)(\?|$)/i.test(u);
-        if (!isAudio) {
+        const isDoc = mt === 'file' || /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|rtf|zip|rar|7z|gz|tar|json|xml|html|css|js|apk)(\?|$)/i.test(u);
+        if (!isAudio && !isDoc) {
           seen.add(u);
           list.push({
             url: u,
@@ -3374,9 +3452,10 @@
       const url = URL.createObjectURL(file);
       const isVid = file.type && file.type.startsWith('video/');
       const isAud = file.type && file.type.startsWith('audio/');
+      const isImg = file.type && file.type.startsWith('image/');
       return {
         url,
-        mediaType: isAud ? 'audio' : (isVid ? 'video' : 'image'),
+        mediaType: isAud ? 'audio' : (isVid ? 'video' : (isImg ? 'image' : 'file')),
         mediaName: file.name,
         size: file.size,
         file,

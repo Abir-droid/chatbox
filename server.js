@@ -464,27 +464,13 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   fileFilter: (req, file, cb) => {
-    const mime = (file.mimetype || '').toLowerCase();
     const orig = (file.originalname || '').toLowerCase();
-    const isImage = mime.startsWith('image/');
-    const isAudio =
-      orig.startsWith('voice-') ||
-      mime.startsWith('audio/') ||
-      orig.endsWith('.webm') ||
-      orig.endsWith('.ogg') ||
-      orig.endsWith('.wav') ||
-      orig.endsWith('.mp3') ||
-      orig.endsWith('.m4a') ||
-      orig.endsWith('.aac') ||
-      orig.endsWith('.opus') ||
-      mime.includes('webm') ||
-      mime.includes('ogg') ||
-      mime.includes('wav');
-    const isVideo = !isAudio && (mime.startsWith('video/') || orig.endsWith('.mp4') || orig.endsWith('.mov'));
-    if (isImage || isVideo || isAudio) {
-      cb(null, true);
+    const blockedExts = ['.exe', '.bat', '.cmd', '.sh', '.vbs', '.msi', '.ps1', '.com', '.scr', '.pif'];
+    const isBlocked = blockedExts.some((ext) => orig.endsWith(ext));
+    if (isBlocked) {
+      cb(new Error('Executable script and binary files (.exe, .bat, etc.) cannot be uploaded for security reasons.'));
     } else {
-      cb(new Error('Only photo, video, and audio files are supported.'));
+      cb(null, true);
     }
   },
 });
@@ -1048,7 +1034,7 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
       let lastMsgRes;
       if (clearedAt) {
         lastMsgRes = await pool.query(
-          `SELECT body, media_type, sender_name, created_at, is_deleted
+          `SELECT body, media_type, media_name, media_list, sender_name, created_at, is_deleted
            FROM chat_messages
            WHERE conversation_id = $1 AND is_deleted = FALSE AND created_at > $2
            ORDER BY id DESC LIMIT 1`,
@@ -1056,7 +1042,7 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
         );
       } else {
         lastMsgRes = await pool.query(
-          `SELECT body, media_type, sender_name, created_at, is_deleted
+          `SELECT body, media_type, media_name, media_list, sender_name, created_at, is_deleted
            FROM chat_messages
            WHERE conversation_id = $1 AND is_deleted = FALSE
            ORDER BY id DESC LIMIT 1`,
@@ -1124,9 +1110,22 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
       );
       const memberCount = countRes.rows[0].count;
 
+      let lastMsgText = '';
+      if (lastMsgRes.rows.length) {
+        const row = lastMsgRes.rows[0];
+        lastMsgText = row.body || '';
+        if (!lastMsgText) {
+          if (row.media_type === 'audio') lastMsgText = '🎤 Voice note';
+          else if (row.media_type === 'image') lastMsgText = '📷 Photo';
+          else if (row.media_type === 'video') lastMsgText = '🎥 Video';
+          else if (row.media_type === 'file') lastMsgText = `📎 ${row.media_name || 'Document'}`;
+          else if (row.media_type) lastMsgText = `📎 ${row.media_name || 'Attachment'}`;
+        }
+      }
+
       const lastMessage = lastMsgRes.rows.length
         ? {
-            text: lastMsgRes.rows[0].media_type ? `[${lastMsgRes.rows[0].media_type}]` : lastMsgRes.rows[0].body,
+            text: lastMsgText,
             senderName: lastMsgRes.rows[0].sender_name,
             ts: new Date(lastMsgRes.rows[0].created_at).getTime(),
           }
@@ -1815,7 +1814,7 @@ app.get('/api/conversations/:id/media', authMiddleware, async (req, res) => {
             msgId: Number(r.id),
             url,
             mediaType: isAudio ? 'audio' : (isVideo ? 'video' : (isImage ? 'image' : 'file')),
-            mediaName: item.mediaName || (isAudio ? 'Voice Note' : (isVideo ? 'Video' : 'Photo')),
+            mediaName: item.mediaName || (isAudio ? 'Voice Note' : (isVideo ? 'Video' : (isImage ? 'Photo' : 'Document'))),
             senderName: r.sender_name,
             ts,
           };
@@ -1869,7 +1868,11 @@ function inspectFileMediaType(file) {
     mime.includes('ogg') ||
     mime.includes('wav');
   const isVideo = !isAudio && (mime.startsWith('video/') || orig.endsWith('.mp4') || orig.endsWith('.mov'));
-  return isAudio ? 'audio' : (isVideo ? 'video' : 'image');
+  const isImage = !isAudio && !isVideo && mime.startsWith('image/');
+  if (isAudio) return 'audio';
+  if (isVideo) return 'video';
+  if (isImage) return 'image';
+  return 'file';
 }
 
 // Media: Upload Photo / Video / Audio (Voice Message)
@@ -2631,14 +2634,18 @@ io.on('connection', async (socket) => {
       io.to(targetRooms).emit('message', msg);
 
       let snippetText = text;
-      if (mediaList && mediaList.length > 1) {
-        snippetText = `📷 ${mediaList.length} media files`;
-      } else if (mediaType === 'audio') {
-        snippetText = '🎤 Voice note';
-      } else if (mediaType === 'image') {
-        snippetText = '📷 Photo';
-      } else if (mediaType === 'video') {
-        snippetText = '🎥 Video';
+      if (!snippetText) {
+        if (mediaList && mediaList.length > 1) {
+          snippetText = `📎 ${mediaList.length} files`;
+        } else if (mediaType === 'audio') {
+          snippetText = '🎤 Voice note';
+        } else if (mediaType === 'image') {
+          snippetText = '📷 Photo';
+        } else if (mediaType === 'video') {
+          snippetText = '🎥 Video';
+        } else if (mediaType === 'file') {
+          snippetText = `📎 ${mediaName || 'Document'}`;
+        }
       }
 
       for (const m of members.rows) {
