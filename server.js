@@ -21,6 +21,13 @@ const { Server } = require('socket.io');
 const { Pool } = require('pg');
 const multer = require('multer');
 
+let heicConvert = null;
+try {
+  heicConvert = require('heic-convert');
+} catch (err) {
+  console.warn('heic-convert not loaded:', err.message);
+}
+
 /* ------------------------------------------------------------------ config */
 
 function normalizePrefix(value) {
@@ -490,6 +497,60 @@ async function persistMediaFile(file) {
   }
 }
 
+function isHeicFile(filename, mimetype) {
+  const name = String(filename || '').toLowerCase();
+  const mime = String(mimetype || '').toLowerCase();
+  return (
+    name.endsWith('.heic') ||
+    name.endsWith('.heif') ||
+    mime === 'image/heic' ||
+    mime === 'image/heif'
+  );
+}
+
+async function convertHeicBufferToJpeg(buffer) {
+  if (!heicConvert || !buffer) return null;
+  try {
+    return await heicConvert({
+      buffer,
+      format: 'JPEG',
+      quality: 0.92,
+    });
+  } catch (err) {
+    console.error('HEIC to JPEG conversion error:', err.message);
+    return null;
+  }
+}
+
+async function processUploadedFile(file) {
+  if (!file || !file.path) return file;
+  if (isHeicFile(file.originalname, file.mimetype) || isHeicFile(file.filename, file.mimetype)) {
+    try {
+      const data = await fs.promises.readFile(file.path);
+      const converted = await convertHeicBufferToJpeg(data);
+      if (converted && converted.length) {
+        const oldPath = file.path;
+        const newFilename = file.filename.replace(/\.(heic|heif)$/i, '') + '.jpg';
+        const newPath = path.join(UPLOADS_DIR, newFilename);
+
+        await fs.promises.writeFile(newPath, converted);
+        if (oldPath !== newPath && fs.existsSync(oldPath)) {
+          await fs.promises.unlink(oldPath).catch(() => {});
+        }
+
+        file.filename = newFilename;
+        file.path = newPath;
+        file.mimetype = 'image/jpeg';
+        file.size = converted.length;
+        file.originalname = (file.originalname || 'photo').replace(/\.(heic|heif)$/i, '') + '.jpg';
+      }
+    } catch (err) {
+      console.error('Failed to convert uploaded HEIC file to JPEG:', err);
+    }
+  }
+  return file;
+}
+
 /* -------------------------------------------------------------------- http */
 
 const ASSET_VERSION = String(Date.now());
@@ -545,6 +606,46 @@ const uploadRoutes = [
 app.get(uploadRoutes, async (req, res, next) => {
   const filename = path.basename(req.params.filename);
   const filePath = path.join(UPLOADS_DIR, filename);
+
+  // If a HEIC file is requested, serve converted JPEG so web browsers never fail or show broken media
+  if (isHeicFile(filename)) {
+    const cachedJpgName = filename.replace(/\.(heic|heif)$/i, '') + '.jpg';
+    const cachedJpgPath = path.join(UPLOADS_DIR, cachedJpgName);
+    if (fs.existsSync(cachedJpgPath)) {
+      res.setHeader('Content-Type', 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=2592000');
+      return res.sendFile(cachedJpgPath);
+    }
+
+    let rawData = null;
+    if (fs.existsSync(filePath)) {
+      try {
+        rawData = await fs.promises.readFile(filePath);
+      } catch (e) {}
+    }
+    if (!rawData) {
+      try {
+        const { rows } = await pool.query(
+          'SELECT data FROM chat_media_files WHERE filename = $1',
+          [filename]
+        );
+        if (rows.length && rows[0].data) {
+          rawData = rows[0].data;
+        }
+      } catch (e) {}
+    }
+
+    if (rawData) {
+      const converted = await convertHeicBufferToJpeg(rawData);
+      if (converted && converted.length) {
+        fs.promises.writeFile(cachedJpgPath, converted).catch(() => {});
+        res.setHeader('Content-Type', 'image/jpeg');
+        res.setHeader('Cache-Control', 'public, max-age=2592000');
+        res.setHeader('Content-Length', converted.length);
+        return res.end(converted);
+      }
+    }
+  }
 
   if (fs.existsSync(filePath)) {
     return next();
@@ -1868,7 +1969,7 @@ function inspectFileMediaType(file) {
     mime.includes('ogg') ||
     mime.includes('wav');
   const isVideo = !isAudio && (mime.startsWith('video/') || orig.endsWith('.mp4') || orig.endsWith('.mov'));
-  const isImage = !isAudio && !isVideo && mime.startsWith('image/');
+  const isImage = !isAudio && !isVideo && (mime.startsWith('image/') || isHeicFile(orig, mime));
   if (isAudio) return 'audio';
   if (isVideo) return 'video';
   if (isImage) return 'image';
@@ -1880,6 +1981,9 @@ app.post('/api/upload', authMiddleware, upload.single('media'), async (req, res)
   if (!req.file) {
     return res.status(400).json({ ok: false, error: 'No media file provided.' });
   }
+
+  // Auto-convert HEIC/HEIF files to JPEG for full web browser compatibility
+  await processUploadedFile(req.file);
 
   // Persist file into PostgreSQL so redeployments never lose it
   await persistMediaFile(req.file);
@@ -1905,6 +2009,7 @@ app.post('/api/upload-multiple', authMiddleware, upload.array('media', 20), asyn
   }
 
   for (const f of files) {
+    await processUploadedFile(f);
     await persistMediaFile(f);
   }
 

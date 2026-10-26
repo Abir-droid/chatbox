@@ -3657,6 +3657,66 @@ dialog.lightbox-dialog::backdrop {
   user-select: none;
 }
 
+.lightbox-error-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 2.2rem 2rem;
+  background: var(--rail-surface, #1e293b);
+  border: 1px solid var(--rail-line, rgba(255, 255, 255, 0.12));
+  border-radius: 16px;
+  max-width: 380px;
+  width: 90%;
+  margin: auto;
+  gap: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+  animation: modalPop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.lightbox-error-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.lightbox-error-icon svg {
+  width: 28px;
+  height: 28px;
+}
+
+.lightbox-error-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--rail-ink, #f1f5f9);
+}
+
+.lightbox-error-sub {
+  font-size: 0.84rem;
+  color: var(--rail-muted, #94a3b8);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.lightbox-error-dl {
+  margin-top: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0.65rem 1.25rem;
+}
+
+.lightbox-error-dl svg {
+  width: 18px;
+  height: 18px;
+}
+
 /* Lightbox Bottom Media Gallery Row */
 .lightbox-gallery-wrap {
   position: fixed;

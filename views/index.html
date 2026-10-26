@@ -822,8 +822,23 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
       </button>
       <div class="lightbox-media-container" id="lightbox-media-container">
-        <img id="lightbox-img" src="" alt="Enlarged media" hidden>
+        <img id="lightbox-img" src="" alt="" hidden>
         <video id="lightbox-video" src="" controls playsinline autoplay hidden></video>
+        <div class="lightbox-error-card" id="lightbox-error" hidden>
+          <div class="lightbox-error-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="8" x2="12" y2="12"/>
+              <line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+          </div>
+          <span class="lightbox-error-title" id="lightbox-error-title">Cannot preview this media file</span>
+          <p class="lightbox-error-sub" id="lightbox-error-sub">This media format is not supported directly by your browser.</p>
+          <button type="button" class="btn-primary lightbox-error-dl" id="lightbox-error-dl-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <span>Download Original File</span>
+          </button>
+        </div>
       </div>
       <div class="lightbox-gallery-wrap" id="lightbox-gallery-wrap">
         <div class="lightbox-gallery" id="lightbox-gallery">
