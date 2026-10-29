@@ -3286,6 +3286,7 @@ dialog[open] .dialog-card {
   max-width: 96vw;
   max-height: calc(100dvh - 2.5rem);
   box-sizing: border-box;
+  overflow-x: hidden;
   overflow-y: auto;
 }
 
@@ -4346,9 +4347,10 @@ dialog.lightbox-dialog::backdrop {
 
 /* Profile Edit Dialog */
 #profile-dialog .dialog-card {
-  width: 480px;
+  width: 440px;
   max-width: 95vw;
-  padding: 1.35rem 1.65rem;
+  padding: 1.4rem 1.65rem;
+  overflow: visible;
 }
 
 #profile-dialog .dialog-header {
@@ -4364,7 +4366,7 @@ dialog.lightbox-dialog::backdrop {
   flex-direction: column;
   align-items: center;
   gap: 0.35rem;
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.4rem;
 }
 
 .profile-avatar-preview-wrap {
@@ -4372,8 +4374,8 @@ dialog.lightbox-dialog::backdrop {
   cursor: pointer;
   border-radius: 50%;
   overflow: hidden;
-  width: 62px;
-  height: 62px;
+  width: 68px;
+  height: 68px;
 }
 
 .profile-avatar-preview-wrap:hover .profile-upload-trigger {
@@ -4393,7 +4395,7 @@ dialog.lightbox-dialog::backdrop {
   justify-content: center;
   gap: 2px;
   opacity: 0.92;
-  font-size: 0.65rem;
+  font-size: 0.68rem;
   font-weight: 600;
   transition: opacity 0.15s ease;
 }
@@ -4408,21 +4410,21 @@ dialog.lightbox-dialog::backdrop {
 
 .avatar-palette {
   display: grid;
-  grid-template-columns: repeat(10, 1fr);
-  gap: 6px;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0.5rem;
   margin-top: 0.35rem;
 }
 
 .palette-color-btn {
-  height: 32px;
-  border-radius: 8px;
+  height: 38px;
+  border-radius: 10px;
   border: 2px solid transparent;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   color: #fff;
-  font-size: 0.82rem;
+  font-size: 0.95rem;
   font-weight: 700;
   transition: all 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
@@ -4437,7 +4439,7 @@ dialog.lightbox-dialog::backdrop {
 }
 
 #profile-dialog .dialog-actions {
-  margin-top: 0.3rem;
+  margin-top: 0.35rem;
 }
 
 .danger-btn {
