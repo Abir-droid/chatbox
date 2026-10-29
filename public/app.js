@@ -95,7 +95,6 @@
     emptyText: $('empty-text'),
     messages: $('messages'),
     jump: $('jump'),
-    jumpText: $('jump-text'),
     typing: $('typing'),
 
     composer: $('composer'),
@@ -1710,6 +1709,7 @@
 
   async function switchConversation(convId) {
     state.activeConversationId = convId;
+    if (el.jump) el.jump.hidden = true;
     exitSelectionMode();
     closeRail();
     updateMenuButton();
@@ -1766,6 +1766,7 @@
       const data = await api(`/api/conversations/${convId}/messages`);
       const msgs = data.messages || [];
       renderMessages(msgs, data.firstUnreadMessageId || null);
+      updateJumpButton();
       // Auto-repair any missing media if cached in this browser
       msgs.forEach((m) => {
         const list = m.mediaList || (m.mediaUrl ? [{ url: m.mediaUrl, missing: m.mediaMissing }] : []);
@@ -1885,6 +1886,7 @@
   }
 
   function renderMessages(messages, firstUnreadMessageId = null) {
+    if (el.jump) el.jump.hidden = true;
     el.messages.replaceChildren();
     if (!messages.length) {
       el.emptyState.hidden = false;
@@ -1929,7 +1931,8 @@
         if (unreadEl) {
           setTimeout(() => {
             unreadEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }, 60);
+            updateJumpButton();
+          }, 80);
         } else {
           scrollToBottom();
         }
@@ -1952,8 +1955,10 @@
       setTimeout(() => {
         row.remove();
         cleanupDateSeparators();
+        updateJumpButton();
         if (el.messages && el.messages.querySelectorAll('.msg-row').length === 0) {
           el.emptyState.hidden = false;
+          if (el.jump) el.jump.hidden = true;
         }
       }, 240);
     }
@@ -2888,7 +2893,20 @@
   }
 
   function scrollToBottom() {
-    el.log.scrollTop = el.log.scrollHeight;
+    if (el.log) el.log.scrollTop = el.log.scrollHeight;
+    if (el.jump) el.jump.hidden = true;
+  }
+
+  function updateJumpButton() {
+    if (!el.jump || !el.log) return;
+    const scrollableRange = el.log.scrollHeight - el.log.clientHeight;
+    // Chat doesn't have enough messages to scroll -> never show button
+    if (scrollableRange <= 40) {
+      el.jump.hidden = true;
+      return;
+    }
+    const distFromBottom = scrollableRange - el.log.scrollTop;
+    el.jump.hidden = distFromBottom <= 120;
   }
 
   function formatShortTime(ts) {
@@ -5898,13 +5916,19 @@
   // Jump to bottom button & log scroll listener with auto-pin ResizeObserver
   if (el.log && el.jump) {
     let wasNearBottom = true;
+    el.jump.hidden = true;
     el.log.addEventListener('scroll', () => {
-      const distFromBottom = el.log.scrollHeight - el.log.scrollTop - el.log.clientHeight;
-      wasNearBottom = distFromBottom <= 120;
-      el.jump.hidden = distFromBottom <= 160;
+      const scrollableRange = el.log.scrollHeight - el.log.clientHeight;
+      const distFromBottom = scrollableRange - el.log.scrollTop;
+      wasNearBottom = scrollableRange <= 40 || distFromBottom <= 120;
+      updateJumpButton();
     }, { passive: true });
+
     el.jump.onclick = () => {
-      scrollToBottom();
+      el.jump.hidden = true;
+      if (el.log) {
+        el.log.scrollTo({ top: el.log.scrollHeight, behavior: 'smooth' });
+      }
     };
 
     if (window.ResizeObserver) {
@@ -5912,6 +5936,7 @@
         if (wasNearBottom && el.log) {
           el.log.scrollTop = el.log.scrollHeight;
         }
+        updateJumpButton();
       });
       logObserver.observe(el.log);
     }
