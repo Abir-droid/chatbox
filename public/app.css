@@ -1342,6 +1342,7 @@ button:active {
   max-width: 100%;
   min-width: 0;
   box-sizing: border-box;
+  padding-bottom: 0.6rem;
 }
 
 .msg-row {
@@ -1599,26 +1600,89 @@ button:active {
   display: block;
 }
 
+/* Media with Caption Bubble - Professional WhatsApp / Telegram style */
 .bubble.has-media {
-  padding: 4px !important;
+  max-width: 420px !important;
+  width: fit-content;
+  padding: 4px 4px 6px 4px !important;
   border: none !important;
+  box-sizing: border-box;
 }
 
 .bubble.has-media .msg-media {
+  width: 100% !important;
+  max-width: 100% !important;
   margin: 0 !important;
-  border: none !important;
+  border-radius: 13px 13px 4px 4px !important;
+  overflow: hidden;
+  display: block;
+}
+
+.bubble.has-media .msg-media-collage {
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 0 !important;
+  border-radius: 13px 13px 4px 4px !important;
 }
 
 .bubble.has-media .msg-media img,
 .bubble.has-media .msg-media video {
+  width: 100% !important;
+  height: auto !important;
+  max-height: 380px !important;
+  object-fit: cover;
+  display: block;
   border: none !important;
   outline: none !important;
-  border-radius: 12px 12px 4px 4px !important;
+  border-radius: inherit !important;
 }
 
-.bubble.has-media p {
-  padding: 0.45rem 0.65rem 0.35rem !important;
+.bubble.has-media .bubble-caption-wrap {
+  display: block;
+  padding: 6px 6px 2px 6px;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.bubble.has-media .bubble-caption-wrap::after {
+  content: "";
+  display: table;
+  clear: both;
+}
+
+.bubble.has-media p,
+.bubble.has-media .bubble-text {
+  display: inline !important;
+  padding: 0 !important;
   margin: 0 !important;
+  font-size: 0.93rem;
+  line-height: 1.45;
+  color: inherit;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.bubble.has-media .bubble-meta {
+  float: right;
+  display: inline-flex;
+  align-items: center;
+  gap: 2.5px;
+  margin-left: 8px;
+  margin-top: 4px;
+  position: relative;
+  bottom: -2px;
+  font-size: 0.65rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.bubble.has-media .bubble-author {
+  padding: 2px 6px 3px 6px;
+  margin: 0;
+}
+
+.bubble.has-media .msg-reply-quote {
+  margin: 2px 4px 6px 4px;
 }
 
 /* Audio Voice Message Bubbles - clean, borderless, no weird thick colored frame */
@@ -2577,6 +2641,7 @@ button:active {
   display: flex;
   align-items: center;
   flex-shrink: 0;
+  transition: opacity 0.15s ease;
 }
 
 .typing:empty {
@@ -4465,12 +4530,20 @@ dialog.lightbox-dialog::backdrop {
     border-radius: 16px 16px 4px 16px;
   }
 
+  .bubble.has-media {
+    max-width: min(88vw, 320px) !important;
+  }
+
   .msg-media {
     max-width: 280px;
   }
 
+  .bubble.has-media .msg-media {
+    max-width: 100% !important;
+  }
+
   .msg-media img, .msg-media video {
-    max-height: 240px;
+    max-height: 260px;
   }
 
   /* Tap / selected state on touchscreen reveals message actions */

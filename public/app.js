@@ -874,7 +874,8 @@
       if (state.activeConversationId) {
         const active = state.conversations.find((c) => c.id === state.activeConversationId);
         if (active && active.type === 'direct' && active.otherUserId === userId) {
-          el.convSub.textContent = `${active.phone} • ${isOnline ? 'Online' : 'Offline'}`;
+          active.isOnline = isOnline;
+          refreshHeaderSubtitle();
         }
       }
     });
@@ -1202,12 +1203,37 @@
 
   let searchTerm = '';
 
-  function renderTyping() {
-    const names = [...state.typers.values()];
-    if (!names.length) {
-      el.typing.replaceChildren();
+  function refreshHeaderSubtitle() {
+    if (!state.activeConversationId || !el.convSub) return;
+    const conv = state.conversations.find((c) => c.id === state.activeConversationId);
+    if (!conv) return;
+    if (state.typers && state.typers.size > 0) {
+      const names = [...state.typers.values()];
+      const labelText = names.length === 1 ? `${names[0]} is typing…` : 'Multiple people are typing…';
+      el.convSub.textContent = labelText;
       return;
     }
+    if (conv.type === 'group' || conv.isGroup) {
+      el.convSub.textContent = `${conv.memberCount || 0} members`;
+    } else {
+      el.convSub.textContent = `${conv.phone || ''} • ${conv.isOnline ? 'Online' : 'Offline'}`;
+    }
+  }
+
+  function renderTyping() {
+    const distFromBottom = el.log ? (el.log.scrollHeight - el.log.scrollTop - el.log.clientHeight) : 999;
+    const wasNearBottom = distFromBottom <= 120;
+    const names = [...state.typers.values()];
+
+    if (!names.length) {
+      el.typing.replaceChildren();
+      refreshHeaderSubtitle();
+      if (wasNearBottom && el.log) {
+        requestAnimationFrame(() => scrollToBottom());
+      }
+      return;
+    }
+
     const labelText = names.length === 1 ? `${names[0]} is typing…` : 'Multiple people are typing…';
     el.typing.innerHTML = `
       <div class="typing-bubble">
@@ -1219,6 +1245,10 @@
         <span class="typing-label">${labelText}</span>
       </div>
     `;
+    refreshHeaderSubtitle();
+    if (wasNearBottom && el.log) {
+      requestAnimationFrame(() => scrollToBottom());
+    }
   }
 
   function updateUnreadBadges() {
@@ -2185,13 +2215,6 @@
       bubble.appendChild(fileDiv);
     });
 
-    if (msg.text) {
-      const textP = document.createElement('p');
-      textP.className = 'bubble-text';
-      textP.textContent = msg.text;
-      bubble.appendChild(textP);
-    }
-
     // Integrated WhatsApp-style metadata (time & seen/unseen ticks inside bubble)
     const bubbleMeta = document.createElement('div');
     bubbleMeta.className = 'bubble-meta';
@@ -2215,7 +2238,27 @@
       checkWrap.innerHTML = renderTickSvg(msg.status);
       bubbleMeta.appendChild(checkWrap);
     }
-    bubble.appendChild(bubbleMeta);
+
+    if (bubble.classList.contains('has-media') && msg.text) {
+      const captionWrap = document.createElement('div');
+      captionWrap.className = 'bubble-caption-wrap';
+
+      const textP = document.createElement('p');
+      textP.className = 'bubble-text';
+      textP.textContent = msg.text;
+      captionWrap.appendChild(textP);
+      captionWrap.appendChild(bubbleMeta);
+
+      bubble.appendChild(captionWrap);
+    } else {
+      if (msg.text) {
+        const textP = document.createElement('p');
+        textP.className = 'bubble-text';
+        textP.textContent = msg.text;
+        bubble.appendChild(textP);
+      }
+      bubble.appendChild(bubbleMeta);
+    }
 
     // Message reactions container
     renderMessageReactions(msg.id, msg.reactions, bubble);
@@ -5602,15 +5645,26 @@
     if (!document.hidden) handleWindowFocus();
   });
 
-  // Jump to bottom button & log scroll listener
+  // Jump to bottom button & log scroll listener with auto-pin ResizeObserver
   if (el.log && el.jump) {
+    let wasNearBottom = true;
     el.log.addEventListener('scroll', () => {
       const distFromBottom = el.log.scrollHeight - el.log.scrollTop - el.log.clientHeight;
+      wasNearBottom = distFromBottom <= 120;
       el.jump.hidden = distFromBottom <= 160;
-    });
+    }, { passive: true });
     el.jump.onclick = () => {
       scrollToBottom();
     };
+
+    if (window.ResizeObserver) {
+      const logObserver = new ResizeObserver(() => {
+        if (wasNearBottom && el.log) {
+          el.log.scrollTop = el.log.scrollHeight;
+        }
+      });
+      logObserver.observe(el.log);
+    }
   }
 
   document.addEventListener('keydown', (e) => {
