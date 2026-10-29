@@ -101,6 +101,10 @@
           </div>
         </div>
 
+        <div class="auth-aux-row" id="auth-aux-row">
+          <button type="button" class="btn-link" id="auth-forgot-btn">Forgot password?</button>
+        </div>
+
         <div class="auth-error" id="auth-error" role="alert" hidden></div>
 
         <button type="submit" class="auth-submit" id="auth-submit">
@@ -774,19 +778,6 @@
           </div>
         </div>
 
-        <div class="field" id="admin-claim-section">
-          <label for="claim-admin-code">Administrator Privilege</label>
-          <div class="claim-admin-wrap" style="display:flex;gap:0.5rem;align-items:center;">
-            <div class="input-wrap" style="flex:1;">
-              <svg class="input-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-              <input type="password" id="claim-admin-code" placeholder="Admin code (e.g. admin123)">
-            </div>
-            <button type="button" class="btn-secondary" id="claim-admin-btn" style="white-space:nowrap;padding:0.6rem 0.85rem;height:auto;font-size:0.85rem;">
-              <span>Claim Admin</span>
-            </button>
-          </div>
-        </div>
-
         <p class="field-error" id="profile-error"></p>
 
         <div class="dialog-actions">
@@ -959,6 +950,108 @@
         </button>
         <button type="button" class="ghost notif-prompt-btn-secondary" id="notif-prompt-dismiss">Not Now</button>
       </div>
+    </div>
+  </dialog>
+
+  <!-- Modal: Forgot / Recreate Password -->
+  <dialog id="forgot-dialog" aria-labelledby="forgot-title">
+    <div class="dialog-card">
+      <div class="dialog-header">
+        <div class="dialog-title-wrap">
+          <svg viewBox="0 0 24 24" class="dialog-icon" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          <h2 id="forgot-title">Password Recovery</h2>
+        </div>
+        <button type="button" class="icon-btn close-dialog" data-dialog="forgot-dialog" aria-label="Close dialog">✕</button>
+      </div>
+
+      <div class="dialog-tabs">
+        <button type="button" class="tab-btn active" id="tab-forgot-req">
+          <span>1. Request Reset</span>
+        </button>
+        <button type="button" class="tab-btn" id="tab-forgot-recreate">
+          <span>2. Recreate Password</span>
+        </button>
+      </div>
+
+      <!-- Step 1: Request Admin to Clear Password -->
+      <form id="forgot-req-form">
+        <p class="dialog-desc">Enter your phone number to submit a password reset request. Once an administrator clears your password, you will be able to set a new password.</p>
+        <div class="field">
+          <label for="forgot-phone">Your Phone Number</label>
+          <div class="input-wrap phone-wrap">
+            <select class="country-select" id="forgot-country" aria-label="Country Code">
+              <option value="+880" data-max="11" data-local-prefix="0" selected>🇧🇩 +880</option>
+              <option value="+1" data-max="10">🇺🇸 +1</option>
+              <option value="+44" data-max="10">🇬🇧 +44</option>
+              <option value="+91" data-max="10">🇮🇳 +91</option>
+              <option value="+966" data-max="9">🇸🇦 +966</option>
+              <option value="+971" data-max="9">🇦🇪 +971</option>
+              <option value="+60" data-max="10">🇲🇾 +60</option>
+              <option value="+65" data-max="8">🇸🇬 +65</option>
+              <option value="+974" data-max="8">🇶🇦 +974</option>
+              <option value="+965" data-max="8">🇰🇼 +965</option>
+              <option value="+968" data-max="8">🇴🇲 +968</option>
+            </select>
+            <input type="tel" id="forgot-phone" placeholder="01XXXXXXXXX" autocomplete="tel" required maxlength="11">
+          </div>
+        </div>
+
+        <div class="auth-error" id="forgot-req-error" role="alert" hidden></div>
+        <div class="auth-success" id="forgot-req-success" role="alert" hidden></div>
+
+        <div class="dialog-actions">
+          <button type="button" class="ghost close-dialog" data-dialog="forgot-dialog">Cancel</button>
+          <button type="submit" class="primary" id="forgot-req-submit">Submit Request</button>
+        </div>
+      </form>
+
+      <!-- Step 2: Recreate Password -->
+      <form id="forgot-recreate-form" hidden>
+        <p class="dialog-desc">If an administrator has cleared your password, enter your phone and your new password to recreate it and log in.</p>
+        <div class="field">
+          <label for="recreate-phone">Your Phone Number</label>
+          <div class="input-wrap phone-wrap">
+            <select class="country-select" id="recreate-country" aria-label="Country Code">
+              <option value="+880" data-max="11" data-local-prefix="0" selected>🇧🇩 +880</option>
+              <option value="+1" data-max="10">🇺🇸 +1</option>
+              <option value="+44" data-max="10">🇬🇧 +44</option>
+              <option value="+91" data-max="10">🇮🇳 +91</option>
+              <option value="+966" data-max="9">🇸🇦 +966</option>
+              <option value="+971" data-max="9">🇦🇪 +971</option>
+              <option value="+60" data-max="10">🇲🇾 +60</option>
+              <option value="+65" data-max="8">🇸🇬 +65</option>
+              <option value="+974" data-max="8">🇶🇦 +974</option>
+              <option value="+965" data-max="8">🇰🇼 +965</option>
+              <option value="+968" data-max="8">🇴🇲 +968</option>
+            </select>
+            <input type="tel" id="recreate-phone" placeholder="01XXXXXXXXX" autocomplete="tel" required maxlength="11">
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="recreate-password">New Password</label>
+          <div class="input-wrap">
+            <svg class="input-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            <input type="password" id="recreate-password" placeholder="At least 6 characters" autocomplete="new-password" required minlength="6">
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="recreate-password-confirm">Confirm New Password</label>
+          <div class="input-wrap">
+            <svg class="input-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            <input type="password" id="recreate-password-confirm" placeholder="Repeat new password" autocomplete="new-password" required minlength="6">
+          </div>
+        </div>
+
+        <div class="auth-error" id="forgot-recreate-error" role="alert" hidden></div>
+        <div class="auth-success" id="forgot-recreate-success" role="alert" hidden></div>
+
+        <div class="dialog-actions">
+          <button type="button" class="ghost close-dialog" data-dialog="forgot-dialog">Cancel</button>
+          <button type="submit" class="primary" id="forgot-recreate-submit">Recreate & Sign In</button>
+        </div>
+      </form>
     </div>
   </dialog>
 

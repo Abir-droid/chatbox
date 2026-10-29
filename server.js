@@ -170,6 +170,9 @@ async function initDatabase() {
 
         -- Migrations for profile pic, conversation clear, and friend requests
         ALTER TABLE chat_users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+        ALTER TABLE chat_users ADD COLUMN IF NOT EXISTS password_cleared BOOLEAN NOT NULL DEFAULT FALSE;
+        ALTER TABLE chat_users ADD COLUMN IF NOT EXISTS password_reset_requested BOOLEAN NOT NULL DEFAULT FALSE;
+        ALTER TABLE chat_users ADD COLUMN IF NOT EXISTS password_reset_requested_at TIMESTAMPTZ;
         ALTER TABLE chat_conversation_members ADD COLUMN IF NOT EXISTS cleared_at TIMESTAMPTZ;
         ALTER TABLE chat_conversation_members ADD COLUMN IF NOT EXISTS is_hidden BOOLEAN NOT NULL DEFAULT FALSE;
         ALTER TABLE chat_conversation_members ADD COLUMN IF NOT EXISTS last_read_message_id BIGINT DEFAULT 0;
@@ -355,7 +358,7 @@ async function findUserByPhone(phone) {
   if (!variants.length) return null;
   const placeholders = variants.map((_, i) => `$${i + 1}`).join(', ');
   const { rows } = await pool.query(
-    `SELECT id, phone, name, avatar_color, avatar_url, is_admin, is_suspended, password_hash, created_at
+    `SELECT id, phone, name, avatar_color, avatar_url, is_admin, is_suspended, password_hash, password_cleared, password_reset_requested, created_at
      FROM chat_users
      WHERE phone IN (${placeholders})
      LIMIT 1`,
@@ -407,7 +410,7 @@ function parseToken(token) {
 async function getUserById(id) {
   if (!id) return null;
   const { rows } = await pool.query(
-    'SELECT id, phone, name, avatar_color, avatar_url, is_admin, is_suspended, created_at FROM chat_users WHERE id = $1',
+    'SELECT id, phone, name, avatar_color, avatar_url, is_admin, is_suspended, password_cleared, password_reset_requested, created_at FROM chat_users WHERE id = $1',
     [id]
   );
   if (!rows.length) return null;
@@ -778,7 +781,20 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     const user = await findUserByPhone(phone);
-    if (!user || !verifyPassword(password, user.password_hash)) {
+    if (!user) {
+      return res.status(401).json({ ok: false, error: 'Incorrect phone number or password.' });
+    }
+
+    if (user.password_cleared) {
+      return res.status(403).json({
+        ok: false,
+        passwordCleared: true,
+        phone: user.phone,
+        error: 'Your password was cleared by an administrator. Please recreate your password.'
+      });
+    }
+
+    if (!verifyPassword(password, user.password_hash)) {
       return res.status(401).json({ ok: false, error: 'Incorrect phone number or password.' });
     }
 
@@ -793,6 +809,146 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (err) {
     console.error('Login failed:', err);
     res.status(500).json({ ok: false, error: 'Login failed. Try again.' });
+  }
+});
+
+// Auth: Request Password Reset (Forgot Password)
+app.post('/api/auth/forgot-password', async (req, res) => {
+  try {
+    const phone = sanitizePhone(req.body.phone);
+    if (!phone) {
+      return res.status(400).json({ ok: false, error: 'Please enter a valid phone number.' });
+    }
+
+    const user = await findUserByPhone(phone);
+    if (!user) {
+      return res.status(404).json({ ok: false, error: 'No registered user found with this phone number.' });
+    }
+
+    if (user.is_suspended) {
+      return res.status(403).json({ ok: false, error: 'Your account has been suspended by an administrator.' });
+    }
+
+    if (user.password_cleared) {
+      return res.json({
+        ok: true,
+        passwordCleared: true,
+        phone: user.phone,
+        name: user.name,
+        message: 'Your password has already been cleared by an administrator. You can recreate your password now!'
+      });
+    }
+
+    // Flag password_reset_requested
+    await pool.query(
+      `UPDATE chat_users
+       SET password_reset_requested = TRUE,
+           password_reset_requested_at = now()
+       WHERE id = $1`,
+      [user.id]
+    );
+
+    // Notify any online administrators via socket
+    io.emit('admin_user_event', {
+      type: 'password_reset_requested',
+      userId: user.id,
+      name: user.name,
+      phone: user.phone
+    });
+
+    res.json({
+      ok: true,
+      passwordCleared: false,
+      phone: user.phone,
+      name: user.name,
+      message: 'Password reset request submitted. Please wait for an administrator to clear your password from the admin panel.'
+    });
+  } catch (err) {
+    console.error('Forgot password error:', err);
+    res.status(500).json({ ok: false, error: 'Could not process password reset request.' });
+  }
+});
+
+// Auth: Check if user's password was cleared by admin
+app.post('/api/auth/check-password-status', async (req, res) => {
+  try {
+    const phone = sanitizePhone(req.body.phone);
+    if (!phone) {
+      return res.status(400).json({ ok: false, error: 'Phone number is required.' });
+    }
+
+    const user = await findUserByPhone(phone);
+    if (!user) {
+      return res.status(404).json({ ok: false, error: 'No account found with this phone number.' });
+    }
+
+    res.json({
+      ok: true,
+      phone: user.phone,
+      name: user.name,
+      passwordCleared: Boolean(user.password_cleared),
+      passwordResetRequested: Boolean(user.password_reset_requested)
+    });
+  } catch (err) {
+    console.error('Check password status error:', err);
+    res.status(500).json({ ok: false, error: 'Could not check password status.' });
+  }
+});
+
+// Auth: Recreate password (only allowed after admin has cleared the password)
+app.post('/api/auth/recreate-password', async (req, res) => {
+  try {
+    const phone = sanitizePhone(req.body.phone);
+    const newPassword = String(req.body.newPassword || req.body.password || '');
+
+    if (!phone) {
+      return res.status(400).json({ ok: false, error: 'Phone number is required.' });
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ ok: false, error: 'New password must be at least 6 characters.' });
+    }
+
+    const user = await findUserByPhone(phone);
+    if (!user) {
+      return res.status(404).json({ ok: false, error: 'User not found.' });
+    }
+
+    if (user.is_suspended) {
+      return res.status(403).json({ ok: false, error: 'Your account has been suspended by an administrator.' });
+    }
+
+    if (!user.password_cleared) {
+      return res.status(403).json({
+        ok: false,
+        passwordCleared: false,
+        error: 'Your password has not been cleared by an administrator yet. Please request a password reset first.'
+      });
+    }
+
+    const hash = hashPassword(newPassword);
+    await pool.query(
+      `UPDATE chat_users
+       SET password_hash = $1,
+           password_cleared = FALSE,
+           password_reset_requested = FALSE,
+           password_reset_requested_at = NULL
+       WHERE id = $2`,
+      [hash, user.id]
+    );
+
+    const updatedUser = await getUserById(user.id);
+    delete updatedUser.password_hash;
+    const token = generateToken(updatedUser.id);
+
+    res.json({
+      ok: true,
+      user: updatedUser,
+      token,
+      message: 'Password recreated successfully! You are now logged in.'
+    });
+  } catch (err) {
+    console.error('Recreate password error:', err);
+    res.status(500).json({ ok: false, error: 'Could not recreate password.' });
   }
 });
 
@@ -2284,7 +2440,9 @@ app.get('/api/admin/stats', authMiddleware, adminMiddleware, async (req, res) =>
 app.get('/api/admin/users', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const { rows } = await pool.query(`
-      SELECT u.id, u.phone, u.name, u.avatar_color, u.is_admin, u.is_suspended, u.created_at,
+      SELECT u.id, u.phone, u.name, u.avatar_color, u.is_admin, u.is_suspended,
+             u.password_cleared, u.password_reset_requested, u.password_reset_requested_at,
+             u.created_at,
              count(m.id)::int as message_count
       FROM chat_users u
       LEFT JOIN chat_messages m ON u.id = m.sender_id
@@ -2299,6 +2457,9 @@ app.get('/api/admin/users', authMiddleware, adminMiddleware, async (req, res) =>
       avatarColor: u.avatar_color,
       isAdmin: u.is_admin,
       isSuspended: u.is_suspended,
+      passwordCleared: Boolean(u.password_cleared),
+      passwordResetRequested: Boolean(u.password_reset_requested),
+      passwordResetRequestedAt: u.password_reset_requested_at ? new Date(u.password_reset_requested_at).getTime() : null,
       messageCount: u.message_count,
       isOnline: onlineUsers.has(Number(u.id)),
       createdAt: new Date(u.created_at).getTime(),
@@ -2308,6 +2469,52 @@ app.get('/api/admin/users', authMiddleware, adminMiddleware, async (req, res) =>
   } catch (err) {
     console.error('Admin list users error:', err);
     res.status(500).json({ ok: false, error: 'Could not load users.' });
+  }
+});
+
+// Admin: Clear user password (allows user to recreate password via forgot password flow)
+app.post('/api/admin/users/:id/clear-password', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const targetId = Number(req.params.id);
+    if (targetId === req.user.id) {
+      return res.status(400).json({ ok: false, error: 'You cannot clear your own admin password from here. Please use profile settings to change your password.' });
+    }
+
+    const targetUser = await getUserById(targetId);
+    if (!targetUser) {
+      return res.status(404).json({ ok: false, error: 'User not found.' });
+    }
+
+    await pool.query(
+      `UPDATE chat_users
+       SET password_hash = '',
+           password_cleared = TRUE,
+           password_reset_requested = FALSE,
+           password_reset_requested_at = NULL
+       WHERE id = $1`,
+      [targetId]
+    );
+
+    // Disconnect active socket sessions for this user
+    for (const [socketId, socket] of io.sockets.sockets) {
+      if (socket.user && socket.user.id === targetId) {
+        socket.emit('password_cleared');
+        socket.disconnect(true);
+      }
+    }
+    onlineUsers.delete(targetId);
+
+    // Notify any online admins to refresh their user list
+    io.emit('admin_user_event', { type: 'password_cleared', userId: targetId });
+
+    res.json({
+      ok: true,
+      targetId,
+      message: `Password cleared for ${targetUser.name} (${targetUser.phone}). The user can now recreate their password.`
+    });
+  } catch (err) {
+    console.error('Admin clear password error:', err);
+    res.status(500).json({ ok: false, error: 'Could not clear user password.' });
   }
 });
 
@@ -2507,35 +2714,6 @@ app.post('/api/admin/users/:id/role', authMiddleware, adminMiddleware, async (re
   } catch (err) {
     console.error('Change user role error:', err);
     res.status(500).json({ ok: false, error: 'Could not update user role.' });
-  }
-});
-
-// Auth: Claim admin privileges (with admin code or if no other admin exists)
-app.post('/api/auth/claim-admin', authMiddleware, async (req, res) => {
-  try {
-    const code = String(req.body.code || '').trim();
-    const adminCountRes = await pool.query('SELECT count(*)::int as count FROM chat_users WHERE is_admin = TRUE');
-    const hasAdmins = adminCountRes.rows[0].count > 0;
-
-    const validCodes = ['admin', 'admin123', 'chatboxadmin'];
-    if (process.env.ADMIN_KEY) validCodes.push(process.env.ADMIN_KEY.trim());
-    if (process.env.ADMIN_CODE) validCodes.push(process.env.ADMIN_CODE.trim());
-
-    const isAuthorized = !hasAdmins || validCodes.includes(code);
-    if (!isAuthorized) {
-      return res.status(403).json({ ok: false, error: 'Invalid admin authorization code.' });
-    }
-
-    await pool.query('UPDATE chat_users SET is_admin = TRUE WHERE id = $1', [req.user.id]);
-    const updated = await getUserById(req.user.id);
-
-    // Notify user socket
-    io.to(`u:${req.user.id}`).emit('role_changed', { isAdmin: true });
-
-    res.json({ ok: true, user: updated, message: 'You have been granted administrator access!' });
-  } catch (err) {
-    console.error('Claim admin error:', err);
-    res.status(500).json({ ok: false, error: 'Could not claim admin status.' });
   }
 });
 

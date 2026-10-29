@@ -23,7 +23,28 @@
     pwEye: $('pw-eye'),
     pwEyeOff: $('pw-eye-off'),
     authError: $('auth-error'),
+    authAuxRow: $('auth-aux-row'),
+    authForgotBtn: $('auth-forgot-btn'),
     authSubmit: $('auth-submit'),
+
+    // Forgot / Recreate Password Dialog
+    forgotDialog: $('forgot-dialog'),
+    tabForgotReq: $('tab-forgot-req'),
+    tabForgotRecreate: $('tab-forgot-recreate'),
+    forgotReqForm: $('forgot-req-form'),
+    forgotCountry: $('forgot-country'),
+    forgotPhone: $('forgot-phone'),
+    forgotReqError: $('forgot-req-error'),
+    forgotReqSuccess: $('forgot-req-success'),
+    forgotReqSubmit: $('forgot-req-submit'),
+    forgotRecreateForm: $('forgot-recreate-form'),
+    recreateCountry: $('recreate-country'),
+    recreatePhone: $('recreate-phone'),
+    recreatePassword: $('recreate-password'),
+    recreatePasswordConfirm: $('recreate-password-confirm'),
+    forgotRecreateError: $('forgot-recreate-error'),
+    forgotRecreateSuccess: $('forgot-recreate-success'),
+    forgotRecreateSubmit: $('forgot-recreate-submit'),
 
     app: $('app'),
     rail: $('rail'),
@@ -688,6 +709,8 @@
   setupCountryPhoneInput(el.dmCountry, el.dmPhone);
   setupCountryPhoneInput(el.friendCountry, el.friendPhone);
   setupCountryPhoneInput(el.newMemberCountry, el.newMemberPhone);
+  setupCountryPhoneInput(el.forgotCountry, el.forgotPhone);
+  setupCountryPhoneInput(el.recreateCountry, el.recreatePhone);
 
   /* ----------------------------------------------------------------- auth UI */
   let isRegisterMode = false;
@@ -698,6 +721,7 @@
     el.tabRegister.classList.toggle('active', register);
     el.nameField.hidden = !register;
     el.authName.required = register;
+    if (el.authAuxRow) el.authAuxRow.hidden = register;
     el.authSubmit.textContent = register ? 'Create Account' : 'Sign In';
     el.authError.hidden = true;
     if (register) el.authName.focus();
@@ -753,12 +777,173 @@
       el.authPassword.value = '';
       onLoginSuccess();
     } catch (err) {
+      if (err.data && err.data.passwordCleared) {
+        openForgotDialog(phone, true);
+        toast('Your password was cleared by an administrator. Please set your new password.');
+        return;
+      }
       el.authError.textContent = err.message;
       el.authError.hidden = false;
     } finally {
       el.authSubmit.disabled = false;
       el.authSubmit.textContent = isRegisterMode ? 'Create Account' : 'Sign In';
     }
+  }
+
+  /* ------------------------------------------------------------- forgot / recreate password */
+  function openForgotDialog(prefillPhone, stepTwo = false) {
+    const rawPhone = prefillPhone || (el.authPhone ? el.authPhone.value : '');
+    const country = el.authCountry ? el.authCountry.value : '+880';
+
+    if (el.forgotCountry) el.forgotCountry.value = country;
+    if (el.forgotPhone) el.forgotPhone.value = rawPhone;
+    if (el.recreateCountry) el.recreateCountry.value = country;
+    if (el.recreatePhone) el.recreatePhone.value = rawPhone;
+
+    if (el.recreatePassword) el.recreatePassword.value = '';
+    if (el.recreatePasswordConfirm) el.recreatePasswordConfirm.value = '';
+
+    if (el.forgotReqError) el.forgotReqError.hidden = true;
+    if (el.forgotReqSuccess) el.forgotReqSuccess.hidden = true;
+    if (el.forgotRecreateError) el.forgotRecreateError.hidden = true;
+    if (el.forgotRecreateSuccess) el.forgotRecreateSuccess.hidden = true;
+
+    setForgotStep(stepTwo ? 2 : 1);
+    if (el.forgotDialog && typeof el.forgotDialog.showModal === 'function') {
+      el.forgotDialog.showModal();
+    }
+  }
+
+  function setForgotStep(step) {
+    const isStep1 = step === 1;
+    if (el.tabForgotReq) el.tabForgotReq.classList.toggle('active', isStep1);
+    if (el.tabForgotRecreate) el.tabForgotRecreate.classList.toggle('active', !isStep1);
+    if (el.forgotReqForm) el.forgotReqForm.hidden = !isStep1;
+    if (el.forgotRecreateForm) el.forgotRecreateForm.hidden = isStep1;
+  }
+
+  if (el.authForgotBtn) {
+    el.authForgotBtn.onclick = () => openForgotDialog();
+  }
+
+  if (el.tabForgotReq) {
+    el.tabForgotReq.onclick = () => setForgotStep(1);
+  }
+
+  if (el.tabForgotRecreate) {
+    el.tabForgotRecreate.onclick = () => setForgotStep(2);
+  }
+
+  if (el.forgotReqForm) {
+    el.forgotReqForm.onsubmit = async (e) => {
+      e.preventDefault();
+      if (el.forgotReqError) el.forgotReqError.hidden = true;
+      if (el.forgotReqSuccess) el.forgotReqSuccess.hidden = true;
+
+      const phone = getNormalizedPhone(el.forgotCountry, el.forgotPhone);
+      if (!phone) {
+        if (el.forgotReqError) {
+          el.forgotReqError.textContent = 'Please enter a valid phone number.';
+          el.forgotReqError.hidden = false;
+        }
+        return;
+      }
+
+      if (el.forgotReqSubmit) el.forgotReqSubmit.disabled = true;
+
+      try {
+        const data = await api('/api/auth/forgot-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone }),
+        });
+
+        if (data.passwordCleared) {
+          toast('Your password has already been cleared! You can set your new password now.');
+          if (el.recreatePhone) el.recreatePhone.value = el.forgotPhone.value;
+          if (el.recreateCountry) el.recreateCountry.value = el.forgotCountry.value;
+          setForgotStep(2);
+          if (el.forgotRecreateSuccess) {
+            el.forgotRecreateSuccess.textContent = 'Your password was cleared by an administrator. Please create your new password below.';
+            el.forgotRecreateSuccess.hidden = false;
+          }
+        } else {
+          if (el.forgotReqSuccess) {
+            el.forgotReqSuccess.textContent = data.message || 'Reset request sent! Please wait for an administrator to clear your password.';
+            el.forgotReqSuccess.hidden = false;
+          }
+          toast('Password reset request submitted to admin.');
+        }
+      } catch (err) {
+        if (el.forgotReqError) {
+          el.forgotReqError.textContent = err.message;
+          el.forgotReqError.hidden = false;
+        }
+      } finally {
+        if (el.forgotReqSubmit) el.forgotReqSubmit.disabled = false;
+      }
+    };
+  }
+
+  if (el.forgotRecreateForm) {
+    el.forgotRecreateForm.onsubmit = async (e) => {
+      e.preventDefault();
+      if (el.forgotRecreateError) el.forgotRecreateError.hidden = true;
+      if (el.forgotRecreateSuccess) el.forgotRecreateSuccess.hidden = true;
+
+      const phone = getNormalizedPhone(el.recreateCountry, el.recreatePhone);
+      const newPassword = el.recreatePassword ? el.recreatePassword.value : '';
+      const confirmPassword = el.recreatePasswordConfirm ? el.recreatePasswordConfirm.value : '';
+
+      if (!phone) {
+        if (el.forgotRecreateError) {
+          el.forgotRecreateError.textContent = 'Please enter your phone number.';
+          el.forgotRecreateError.hidden = false;
+        }
+        return;
+      }
+
+      if (newPassword.length < 6) {
+        if (el.forgotRecreateError) {
+          el.forgotRecreateError.textContent = 'New password must be at least 6 characters.';
+          el.forgotRecreateError.hidden = false;
+        }
+        return;
+      }
+
+      if (newPassword !== confirmPassword) {
+        if (el.forgotRecreateError) {
+          el.forgotRecreateError.textContent = 'Passwords do not match.';
+          el.forgotRecreateError.hidden = false;
+        }
+        return;
+      }
+
+      if (el.forgotRecreateSubmit) el.forgotRecreateSubmit.disabled = true;
+
+      try {
+        const data = await api('/api/auth/recreate-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone, newPassword }),
+        });
+
+        toast(data.message || 'Password updated successfully! Welcome back.');
+        state.token = data.token;
+        state.user = data.user;
+        localStorage.setItem('chatbox_token', data.token);
+
+        el.forgotDialog.close();
+        onLoginSuccess();
+      } catch (err) {
+        if (el.forgotRecreateError) {
+          el.forgotRecreateError.textContent = err.message;
+          el.forgotRecreateError.hidden = false;
+        }
+      } finally {
+        if (el.forgotRecreateSubmit) el.forgotRecreateSubmit.disabled = false;
+      }
+    };
   }
 
   function logout() {
@@ -1195,6 +1380,18 @@
       loadConversations();
       loadFriends();
       if (state.user && state.user.is_admin) {
+        loadAdminUsers();
+        loadAdminStats();
+      }
+    });
+
+    socket.on('password_cleared', () => {
+      toast('Your password was cleared by an administrator. Please recreate your password.');
+      logout();
+    });
+
+    socket.on('admin_user_event', () => {
+      if (state.user && state.user.is_admin && el.adminDialog && el.adminDialog.open) {
         loadAdminUsers();
         loadAdminStats();
       }
@@ -5520,9 +5717,15 @@
         tdRole.appendChild(roleWrap);
 
         const tdStatus = document.createElement('td');
-        tdStatus.innerHTML = `<span class="status-badge ${u.isSuspended ? 'suspended' : 'active'}">${
+        let statusHtml = `<span class="status-badge ${u.isSuspended ? 'suspended' : 'active'}">${
           u.isSuspended ? 'Suspended' : 'Active'
         }</span>`;
+        if (u.passwordResetRequested) {
+          statusHtml += ` <span class="status-badge warning" title="User requested password reset">Reset Requested</span>`;
+        } else if (u.passwordCleared) {
+          statusHtml += ` <span class="status-badge info" title="Password cleared by admin. User can recreate.">Password Cleared</span>`;
+        }
+        tdStatus.innerHTML = statusHtml;
 
         const tdAction = document.createElement('td');
         if (u.id !== state.user.id) {
@@ -5530,6 +5733,14 @@
           actionWrap.style.display = 'flex';
           actionWrap.style.alignItems = 'center';
           actionWrap.style.gap = '6px';
+
+          const clearPwBtn = document.createElement('button');
+          clearPwBtn.type = 'button';
+          clearPwBtn.className = 'btn-clear-pw';
+          clearPwBtn.textContent = 'Clear Password';
+          clearPwBtn.title = 'Clear this user’s password so they can recreate it';
+          clearPwBtn.onclick = () => clearUserPassword(u.id, u.name, u.phone);
+          actionWrap.appendChild(clearPwBtn);
 
           const btn = document.createElement('button');
           btn.className = `btn-suspend ${u.isSuspended ? 'unsuspend' : ''}`;
@@ -5552,6 +5763,24 @@
         tr.append(tdName, tdPhone, tdMsgs, tdRole, tdStatus, tdAction);
         el.adminUsersTbody.appendChild(tr);
       }
+    } catch (err) {
+      toast(err.message);
+    }
+  }
+
+  async function clearUserPassword(userId, userName, phone) {
+    const confirmed = window.confirm(
+      `Clear password for "${userName}" (${phone})?\n\nOnce cleared, this user will be able to set a new password via the Forgot Password / Recreate flow.`
+    );
+    if (!confirmed) return;
+
+    try {
+      const res = await api(`/api/admin/users/${userId}/clear-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      toast(res.message || 'Password cleared. User can now recreate their password.');
+      loadAdminUsers();
     } catch (err) {
       toast(err.message);
     }
@@ -5718,27 +5947,6 @@
       renderConversations();
       renderFriends();
     });
-  }
-
-  const claimAdminBtn = $('claim-admin-btn');
-  if (claimAdminBtn) {
-    claimAdminBtn.onclick = async () => {
-      try {
-        const input = $('claim-admin-code');
-        const code = input ? input.value.trim() : '';
-        const res = await api('/api/auth/claim-admin', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code }),
-        });
-        if (state.user) state.user.is_admin = true;
-        el.navAdmin.hidden = false;
-        toast(res.message || 'You are now an administrator!');
-        if (input) input.value = '';
-      } catch (err) {
-        toast(err.message);
-      }
-    };
   }
 
   /* ------------------------------------------------------------- init */
