@@ -1504,7 +1504,9 @@
     document.querySelectorAll('.msg-row.show-menu').forEach((r) => r.classList.remove('show-menu'));
     document.querySelectorAll('.msg-row.hover-actions').forEach((r) => r.classList.remove('hover-actions'));
     document.querySelectorAll('.chat-item-dropdown:not([hidden])').forEach((d) => (d.hidden = true));
+    document.querySelectorAll('.chat-item-dropdown.open-up').forEach((d) => d.classList.remove('open-up'));
     document.querySelectorAll('.chat-item-down-btn.active').forEach((b) => b.classList.remove('active'));
+    document.querySelectorAll('.chat-item.show-menu').forEach((i) => i.classList.remove('show-menu'));
     closeReactionPicker();
     if (el.convDropdown) el.convDropdown.hidden = true;
   }
@@ -1643,7 +1645,26 @@
         const willShow = itemDropdown.hidden;
         closeAllDropdowns();
         itemDropdown.hidden = !willShow;
-        if (!itemDropdown.hidden) itemDownBtn.classList.add('active');
+        if (!itemDropdown.hidden) {
+          itemDownBtn.classList.add('active');
+          li.classList.add('show-menu');
+
+          // Auto-detect if dropdown overflows bottom of rail panel
+          const panel = el.chatList ? el.chatList.closest('.rail-panel') : null;
+          if (panel) {
+            const pRect = panel.getBoundingClientRect();
+            const dRect = itemDropdown.getBoundingClientRect();
+            if (dRect.bottom > pRect.bottom && dRect.top - dRect.height > pRect.top) {
+              itemDropdown.classList.add('open-up');
+            } else {
+              itemDropdown.classList.remove('open-up');
+            }
+          }
+        } else {
+          itemDownBtn.classList.remove('active');
+          li.classList.remove('show-menu');
+          itemDropdown.classList.remove('open-up');
+        }
       }
 
       itemDownBtn.onclick = toggleItemDropdown;
@@ -5894,6 +5915,17 @@
       });
       logObserver.observe(el.log);
     }
+  }
+
+  if (el.panelChats) {
+    el.panelChats.addEventListener('scroll', () => {
+      closeAllDropdowns();
+    }, { passive: true });
+  }
+  if (el.panelFriends) {
+    el.panelFriends.addEventListener('scroll', () => {
+      closeAllDropdowns();
+    }, { passive: true });
   }
 
   document.addEventListener('keydown', (e) => {
