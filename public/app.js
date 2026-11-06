@@ -6254,6 +6254,20 @@
     isCameraOff: false,
     isScreenSharing: false,
     isMinimized: false,
+    remoteHasVideo: true,
+  };
+
+  const CALL_VIDEO_CONSTRAINTS = {
+    facingMode: 'user',
+    width: { ideal: 1920, min: 1280 },
+    height: { ideal: 1080, min: 720 },
+    frameRate: { ideal: 30, min: 24 },
+  };
+
+  const CALL_AUDIO_CONSTRAINTS = {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
   };
 
   let incomingCallData = null;
@@ -6293,13 +6307,82 @@
     if (el.activeCallCenterTimer) el.activeCallCenterTimer.textContent = text;
   }
 
+  function updateCallControlButtons() {
+    if (el.callToggleMicBtn) {
+      el.callToggleMicBtn.classList.toggle('active-off', callState.isMuted);
+      const micOn = el.callToggleMicBtn.querySelector('.ctrl-icon-mic-on');
+      const micOff = el.callToggleMicBtn.querySelector('.ctrl-icon-mic-off');
+      if (micOn) micOn.hidden = callState.isMuted;
+      if (micOff) micOff.hidden = !callState.isMuted;
+      el.callToggleMicBtn.title = callState.isMuted ? 'Unmute Microphone' : 'Mute Microphone';
+      el.callToggleMicBtn.setAttribute('aria-label', el.callToggleMicBtn.title);
+    }
+
+    if (el.callToggleCamBtn) {
+      el.callToggleCamBtn.style.display = 'flex';
+      el.callToggleCamBtn.classList.toggle('active-off', callState.isCameraOff);
+      const camOn = el.callToggleCamBtn.querySelector('.ctrl-icon-cam-on');
+      const camOff = el.callToggleCamBtn.querySelector('.ctrl-icon-cam-off');
+      if (camOn) camOn.hidden = callState.isCameraOff;
+      if (camOff) camOff.hidden = !callState.isCameraOff;
+      el.callToggleCamBtn.title = callState.isCameraOff ? 'Turn Camera On' : 'Turn Camera Off';
+      el.callToggleCamBtn.setAttribute('aria-label', el.callToggleCamBtn.title);
+    }
+
+    if (el.callScreenShareBtn) {
+      el.callScreenShareBtn.style.display = (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) ? 'flex' : 'none';
+      el.callScreenShareBtn.classList.toggle('active-on', callState.isScreenSharing);
+      el.callScreenShareBtn.classList.remove('active-off');
+      el.callScreenShareBtn.title = callState.isScreenSharing ? 'Stop Sharing Screen' : 'Share Screen';
+      el.callScreenShareBtn.setAttribute('aria-label', el.callScreenShareBtn.title);
+    }
+  }
+
+  function notifyVideoState(hasVideo) {
+    if (!callState.callId || !socket) return;
+    socket.emit('call_signal', {
+      callId: callState.callId,
+      signal: {
+        videoState: {
+          hasVideo: Boolean(hasVideo),
+        },
+      },
+    });
+  }
+
+  async function optimizeVideoBitrate(pc) {
+    if (!pc || !pc.getSenders) return;
+    try {
+      const senders = pc.getSenders();
+      for (const sender of senders) {
+        if (sender.track && sender.track.kind === 'video') {
+          const params = sender.getParameters();
+          if (!params.encodings || params.encodings.length === 0) {
+            params.encodings = [{}];
+          }
+          params.encodings[0].maxBitrate = 2500000;
+          params.encodings[0].networkPriority = 'high';
+          await sender.setParameters(params);
+        }
+      }
+    } catch (e) {
+      // Ignore if browser restricts early setParameters
+    }
+  }
+
   function updateRemoteMediaDisplay() {
-    const hasVideoTrack = callState.remoteStream && callState.remoteStream.getVideoTracks().some(
+    const hasLiveTrack = callState.remoteStream && callState.remoteStream.getVideoTracks().some(
       (t) => t.readyState === 'live' && !t.muted
     );
-    if (hasVideoTrack) {
+    const shouldShowVideo = Boolean(callState.remoteHasVideo && hasLiveTrack);
+
+    if (shouldShowVideo) {
       if (el.activeCallRemoteVideo) {
+        if (callState.remoteStream && el.activeCallRemoteVideo.srcObject !== callState.remoteStream) {
+          el.activeCallRemoteVideo.srcObject = callState.remoteStream;
+        }
         el.activeCallRemoteVideo.setAttribute('data-has-stream', 'true');
+        el.activeCallRemoteVideo.play().catch(() => {});
       }
       if (el.activeCallAvatarView) {
         el.activeCallAvatarView.style.display = 'none';
@@ -6307,6 +6390,7 @@
     } else {
       if (el.activeCallRemoteVideo) {
         el.activeCallRemoteVideo.removeAttribute('data-has-stream');
+        el.activeCallRemoteVideo.srcObject = null;
       }
       if (el.activeCallAvatarView) {
         el.activeCallAvatarView.style.display = 'flex';
@@ -6325,6 +6409,7 @@
     callState.isCameraOff = callType !== 'video';
     callState.isScreenSharing = false;
     callState.isMinimized = false;
+    callState.remoteHasVideo = callType === 'video';
 
     if (el.activeCallBadge) el.activeCallBadge.textContent = callType === 'video' ? 'Video Call' : 'Voice Call';
     if (el.activeCallPillTimer) {
@@ -6343,39 +6428,22 @@
 
     setCallStatusText(isInitiator ? 'Calling…' : 'Connecting…');
 
-    if (el.callToggleMicBtn) {
-      el.callToggleMicBtn.classList.remove('active-off');
-      const micOn = el.callToggleMicBtn.querySelector('.ctrl-icon-mic-on');
-      const micOff = el.callToggleMicBtn.querySelector('.ctrl-icon-mic-off');
-      if (micOn) micOn.hidden = false;
-      if (micOff) micOff.hidden = true;
-    }
-
-    // Video camera button is available in both voice and video calls
-    if (el.callToggleCamBtn) {
-      el.callToggleCamBtn.style.display = 'flex';
-      el.callToggleCamBtn.classList.toggle('active-off', callState.isCameraOff);
-      const camOn = el.callToggleCamBtn.querySelector('.ctrl-icon-cam-on');
-      const camOff = el.callToggleCamBtn.querySelector('.ctrl-icon-cam-off');
-      if (camOn) camOn.hidden = callState.isCameraOff;
-      if (camOff) camOff.hidden = !callState.isCameraOff;
-    }
-
-    if (el.callScreenShareBtn) {
-      el.callScreenShareBtn.classList.remove('active-off');
-      el.callScreenShareBtn.style.display = (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) ? 'flex' : 'none';
-    }
+    updateCallControlButtons();
 
     if (el.activeCallRemoteVideo) {
       el.activeCallRemoteVideo.srcObject = null;
       el.activeCallRemoteVideo.removeAttribute('data-has-stream');
     }
-    if (el.activeCallLocalVideo) {
-      el.activeCallLocalVideo.srcObject = null;
+
+    // Attach local stream if active and video is enabled
+    if (callType === 'video' && callState.localStream && el.activeCallLocalVideo) {
+      el.activeCallLocalVideo.srcObject = callState.localStream;
+      el.activeCallLocalVideo.play().catch(() => {});
+      if (el.activeCallPip) el.activeCallPip.hidden = false;
+    } else {
+      if (el.activeCallPip) el.activeCallPip.hidden = true;
     }
-    if (el.activeCallPip) {
-      el.activeCallPip.hidden = callType !== 'video';
-    }
+
     if (el.activeCallAvatarView) {
       el.activeCallAvatarView.style.display = 'flex';
     }
@@ -6431,13 +6499,17 @@
       }
 
       if (event.track.kind === 'video') {
+        callState.remoteHasVideo = true;
         if (el.activeCallRemoteVideo) {
           el.activeCallRemoteVideo.srcObject = stream;
           el.activeCallRemoteVideo.play().catch(() => {});
         }
         event.track.onmute = () => updateRemoteMediaDisplay();
         event.track.onunmute = () => updateRemoteMediaDisplay();
-        event.track.onended = () => updateRemoteMediaDisplay();
+        event.track.onended = () => {
+          callState.remoteHasVideo = false;
+          updateRemoteMediaDisplay();
+        };
         updateRemoteMediaDisplay();
       }
     };
@@ -6448,6 +6520,7 @@
       if (st === 'connected') {
         stopRingtones();
         startCallTimer();
+        optimizeVideoBitrate(pc);
       } else if (st === 'disconnected') {
         setCallStatusText('Reconnecting…');
       } else if (st === 'failed') {
@@ -6496,8 +6569,8 @@
     let localStream;
     try {
       localStream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-        video: callType === 'video' ? { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } } : false,
+        audio: CALL_AUDIO_CONSTRAINTS,
+        video: callType === 'video' ? CALL_VIDEO_CONSTRAINTS : false,
       });
     } catch (err) {
       console.warn('getUserMedia error:', err);
@@ -6505,10 +6578,6 @@
     }
 
     callState.localStream = localStream;
-
-    if (callType === 'video' && el.activeCallLocalVideo) {
-      el.activeCallLocalVideo.srcObject = localStream;
-    }
 
     socket.emit(
       'call_initiate',
@@ -6533,6 +6602,12 @@
           peerAvatarUrl: conv.avatarUrl,
           peerAvatarColor: conv.avatarColor,
         });
+
+        if (callType === 'video' && el.activeCallLocalVideo) {
+          el.activeCallLocalVideo.srcObject = localStream;
+          el.activeCallLocalVideo.play().catch(() => {});
+          if (el.activeCallPip) el.activeCallPip.hidden = false;
+        }
 
         setupPeerConnection();
         startOutgoingRingtone();
@@ -6584,8 +6659,8 @@
     let localStream;
     try {
       localStream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-        video: data.callType === 'video' ? { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } } : false,
+        audio: CALL_AUDIO_CONSTRAINTS,
+        video: data.callType === 'video' ? CALL_VIDEO_CONSTRAINTS : false,
       });
     } catch (err) {
       console.warn('getUserMedia error on accept:', err);
@@ -6609,6 +6684,8 @@
 
     if (data.callType === 'video' && el.activeCallLocalVideo) {
       el.activeCallLocalVideo.srcObject = localStream;
+      el.activeCallLocalVideo.play().catch(() => {});
+      if (el.activeCallPip) el.activeCallPip.hidden = false;
     }
 
     setupPeerConnection();
@@ -6648,6 +6725,9 @@
           callId: callState.callId,
           signal: { sdp: callState.pc.localDescription },
         });
+        if (callState.callType === 'video') {
+          notifyVideoState(true);
+        }
       } catch (err) {
         console.error('Create offer failed:', err);
         endCall('error');
@@ -6659,6 +6739,13 @@
     if (!callState.active || callState.callId !== data.callId || !callState.pc) return;
 
     const signal = data.signal;
+
+    if (signal.videoState) {
+      callState.remoteHasVideo = Boolean(signal.videoState.hasVideo);
+      updateRemoteMediaDisplay();
+      return;
+    }
+
     if (signal.sdp) {
       try {
         const desc = new RTCSessionDescription(signal.sdp);
@@ -6680,6 +6767,9 @@
             callId: callState.callId,
             signal: { sdp: callState.pc.localDescription },
           });
+          if (callState.callType === 'video' || (!callState.isCameraOff && callState.localStream)) {
+            notifyVideoState(true);
+          }
         }
       } catch (err) {
         console.error('Remote SDP error:', err);
@@ -6798,6 +6888,7 @@
     callState.isCameraOff = false;
     callState.isScreenSharing = false;
     callState.isMinimized = false;
+    callState.remoteHasVideo = true;
 
     if (el.activeCallOverlay) {
       el.activeCallOverlay.classList.remove('minimized');
@@ -6816,14 +6907,7 @@
 
     callState.isMuted = !callState.isMuted;
     audioTrack.enabled = !callState.isMuted;
-
-    if (el.callToggleMicBtn) {
-      el.callToggleMicBtn.classList.toggle('active-off', callState.isMuted);
-      const onIcon = el.callToggleMicBtn.querySelector('.ctrl-icon-mic-on');
-      const offIcon = el.callToggleMicBtn.querySelector('.ctrl-icon-mic-off');
-      if (onIcon) onIcon.hidden = callState.isMuted;
-      if (offIcon) offIcon.hidden = !callState.isMuted;
-    }
+    updateCallControlButtons();
   }
 
   async function toggleCallCam() {
@@ -6833,7 +6917,7 @@
       // Turn Camera ON (supports 1-sided camera in voice calls too!)
       try {
         const camStream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+          video: CALL_VIDEO_CONSTRAINTS,
         });
         const camTrack = camStream.getVideoTracks()[0];
         if (!camTrack) return;
@@ -6859,6 +6943,9 @@
           callState.pc.addTrack(camTrack, callState.localStream);
           await renegotiateOffer();
         }
+
+        optimizeVideoBitrate(callState.pc);
+        notifyVideoState(true);
 
         if (el.activeCallPip) {
           el.activeCallPip.hidden = false;
@@ -6893,18 +6980,14 @@
         await sender.replaceTrack(null);
       }
 
+      notifyVideoState(Boolean(callState.isScreenSharing));
+
       if (el.activeCallPip && !callState.isScreenSharing) {
         el.activeCallPip.hidden = true;
       }
     }
 
-    if (el.callToggleCamBtn) {
-      el.callToggleCamBtn.classList.toggle('active-off', callState.isCameraOff);
-      const onIcon = el.callToggleCamBtn.querySelector('.ctrl-icon-cam-on');
-      const offIcon = el.callToggleCamBtn.querySelector('.ctrl-icon-cam-off');
-      if (onIcon) onIcon.hidden = callState.isCameraOff;
-      if (offIcon) offIcon.hidden = !callState.isCameraOff;
-    }
+    updateCallControlButtons();
   }
 
   async function toggleScreenShare() {
@@ -6922,10 +7005,6 @@
         callState.screenStream = stream;
         callState.isScreenSharing = true;
 
-        if (el.callScreenShareBtn) {
-          el.callScreenShareBtn.classList.add('active-off');
-        }
-
         let sender = callState.pc.getSenders().find(
           (s) => (s.track && s.track.kind === 'video') || s.kind === 'video'
         );
@@ -6937,6 +7016,9 @@
           callState.pc.addTrack(screenTrack, stream);
           await renegotiateOffer();
         }
+
+        optimizeVideoBitrate(callState.pc);
+        notifyVideoState(true);
 
         if (el.activeCallPip) {
           el.activeCallPip.hidden = false;
@@ -6950,6 +7032,8 @@
         screenTrack.onended = () => {
           revertScreenShare();
         };
+
+        updateCallControlButtons();
       } catch (err) {
         console.warn('Screen share cancelled or failed:', err);
       }
@@ -6969,10 +7053,6 @@
       callState.screenStream = null;
     }
 
-    if (el.callScreenShareBtn) {
-      el.callScreenShareBtn.classList.remove('active-off');
-    }
-
     const sender = callState.pc?.getSenders().find(
       (s) => (s.track && s.track.kind === 'video') || s.kind === 'video'
     );
@@ -6981,18 +7061,23 @@
       const camTrack = callState.localStream.getVideoTracks()[0];
       if (camTrack && sender) {
         await sender.replaceTrack(camTrack);
+        notifyVideoState(true);
         if (el.activeCallLocalVideo) {
           el.activeCallLocalVideo.srcObject = callState.localStream;
         }
         if (el.activeCallPip) el.activeCallPip.hidden = false;
       } else {
         if (sender) await sender.replaceTrack(null);
+        notifyVideoState(false);
         if (el.activeCallPip) el.activeCallPip.hidden = true;
       }
     } else {
       if (sender) await sender.replaceTrack(null);
+      notifyVideoState(false);
       if (el.activeCallPip) el.activeCallPip.hidden = true;
     }
+
+    updateCallControlButtons();
   }
 
   function toggleMinimizeCall() {

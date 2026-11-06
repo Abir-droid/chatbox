@@ -1134,9 +1134,11 @@
 
       <!-- Center Avatar View (displayed in voice call or when remote video is pending) -->
       <div class="active-call-avatar-view" id="active-call-avatar-view">
-        <div class="call-pulse-ring ring-1"></div>
-        <div class="call-pulse-ring ring-2"></div>
-        <span class="avatar active-call-center-avatar" id="active-call-center-avatar">#</span>
+        <div class="active-call-avatar-wrap">
+          <div class="call-pulse-ring ring-1"></div>
+          <div class="call-pulse-ring ring-2"></div>
+          <span class="avatar active-call-center-avatar" id="active-call-center-avatar">#</span>
+        </div>
         <div class="active-call-center-title" id="active-call-center-title">User</div>
         <div class="active-call-center-timer" id="active-call-center-timer">Calling…</div>
       </div>
@@ -1174,9 +1176,8 @@
           <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
         </svg>
         <svg class="ctrl-icon-cam-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden>
+          <path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10"/>
           <line x1="1" y1="1" x2="23" y2="23"/>
-          <path d="M21 21l-3.34-3.34L16 16.34V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h1.34l-3-3"/>
-          <polygon points="23 7 16 12 23 17 23 7"/>
         </svg>
       </button>
 
