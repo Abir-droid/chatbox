@@ -39,6 +39,12 @@ A self-hosted, full-featured real-time chat application with phone number authen
    - Web Notifications API integration: Receive desktop notifications when messages arrive while the tab is in the background or when viewing another chat.
    - Synthesized gentle audio chime for incoming messages.
 
+7. **1-on-1 Voice & Video Calling (WebRTC)**:
+   - High-definition peer-to-peer audio and video calls directly from direct message conversations.
+   - Socket.IO signaling with automatic timeout handling, busy detection, and graceful disconnect cleanup.
+   - In-app incoming call dialog with synthesized melodic ringtones and answer/decline controls.
+   - Floating call overlay with microphone mute/unmute, camera toggle, screen sharing, duration timer, and minimize-to-widget mode.
+
 ---
 
 ## Project layout

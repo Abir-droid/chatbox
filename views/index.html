@@ -245,6 +245,17 @@
         </div>
 
         <div class="conv-actions" id="conv-actions">
+          <button type="button" class="icon-btn call-action-btn" id="start-voice-call-btn" title="Voice call" aria-label="Voice call" hidden>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+            </svg>
+          </button>
+          <button type="button" class="icon-btn call-action-btn" id="start-video-call-btn" title="Video call" aria-label="Video call" hidden>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polygon points="23 7 16 12 23 17 23 7"/>
+              <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+            </svg>
+          </button>
           <button type="button" class="btn-secondary" id="manage-group-btn" hidden>
             <svg viewBox="0 0 24 24" class="btn-icon" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
             <span>Members</span>
@@ -1053,6 +1064,141 @@
       </form>
     </div>
   </dialog>
+
+  <!-- Modal: Incoming Call -->
+  <dialog id="incoming-call-dialog" class="call-dialog" aria-labelledby="incoming-call-name">
+    <div class="incoming-call-card">
+      <div class="incoming-call-avatar-wrap">
+        <div class="call-pulse-ring ring-1"></div>
+        <div class="call-pulse-ring ring-2"></div>
+        <div class="call-pulse-ring ring-3"></div>
+        <span class="avatar incoming-call-avatar" id="incoming-call-avatar">#</span>
+      </div>
+      <h3 class="incoming-call-name" id="incoming-call-name">Caller Name</h3>
+      <div class="incoming-call-sub" id="incoming-call-sub">Incoming voice call…</div>
+      <div class="incoming-call-actions">
+        <button type="button" class="call-btn-circle call-btn-decline" id="incoming-decline-btn" title="Decline">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="1" y1="1" x2="23" y2="23"/>
+            <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"/>
+          </svg>
+          <span>Decline</span>
+        </button>
+        <button type="button" class="call-btn-circle call-btn-accept" id="incoming-accept-btn" title="Accept">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+          </svg>
+          <span>Accept</span>
+        </button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Active Call Overlay / Screen -->
+  <div class="active-call-overlay" id="active-call-overlay" hidden>
+    <!-- Top Bar -->
+    <div class="active-call-topbar">
+      <div class="active-call-meta">
+        <div class="active-call-pill">
+          <span class="active-call-dot"></span>
+          <span class="active-call-badge" id="active-call-badge">Voice Call</span>
+        </div>
+        <h3 class="active-call-peer-name" id="active-call-peer-name">User</h3>
+        <span class="active-call-status" id="active-call-status">Connecting…</span>
+      </div>
+      <div class="active-call-top-actions">
+        <button type="button" class="icon-btn active-call-min-btn" id="active-call-min-btn" title="Minimize / Expand" aria-label="Minimize or Expand Call">
+          <svg class="icon-min" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="4 14 10 14 10 20"/>
+            <polyline points="20 10 14 10 14 4"/>
+            <line x1="14" y1="10" x2="21" y2="3"/>
+            <line x1="3" y1="21" x2="10" y2="14"/>
+          </svg>
+          <svg class="icon-expand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden>
+            <polyline points="15 3 21 3 21 9"/>
+            <polyline points="9 21 3 21 3 15"/>
+            <line x1="21" y1="3" x2="14" y2="10"/>
+            <line x1="3" y1="21" x2="10" y2="14"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Main Viewport Area -->
+    <div class="active-call-viewport" id="active-call-viewport">
+      <!-- Remote Video for video call -->
+      <video class="active-call-remote-video" id="active-call-remote-video" autoplay playsinline></video>
+      <!-- Remote Audio stream element -->
+      <audio id="active-call-remote-audio" autoplay></audio>
+
+      <!-- Center Avatar View (displayed in voice call or when remote video is pending) -->
+      <div class="active-call-avatar-view" id="active-call-avatar-view">
+        <div class="call-pulse-ring ring-1"></div>
+        <div class="call-pulse-ring ring-2"></div>
+        <span class="avatar active-call-center-avatar" id="active-call-center-avatar">#</span>
+        <div class="active-call-center-title" id="active-call-center-title">User</div>
+        <div class="active-call-center-timer" id="active-call-center-timer">Calling…</div>
+      </div>
+
+      <!-- Local Video Picture-in-Picture Preview -->
+      <div class="active-call-pip" id="active-call-pip" hidden>
+        <video class="active-call-local-video" id="active-call-local-video" autoplay playsinline muted></video>
+        <span class="pip-label">You</span>
+      </div>
+    </div>
+
+    <!-- Floating Call Controls -->
+    <div class="active-call-controls" id="active-call-controls">
+      <!-- Mute/Unmute Mic -->
+      <button type="button" class="call-ctrl-btn" id="call-toggle-mic-btn" title="Mute Microphone" aria-label="Mute Microphone">
+        <svg class="ctrl-icon-mic-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="23"/>
+          <line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+        <svg class="ctrl-icon-mic-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden>
+          <line x1="1" y1="1" x2="23" y2="23"/>
+          <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/>
+          <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/>
+          <line x1="12" y1="19" x2="12" y2="23"/>
+          <line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+      </button>
+
+      <!-- Toggle Camera On/Off -->
+      <button type="button" class="call-ctrl-btn" id="call-toggle-cam-btn" title="Toggle Camera" aria-label="Toggle Camera">
+        <svg class="ctrl-icon-cam-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polygon points="23 7 16 12 23 17 23 7"/>
+          <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+        </svg>
+        <svg class="ctrl-icon-cam-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden>
+          <line x1="1" y1="1" x2="23" y2="23"/>
+          <path d="M21 21l-3.34-3.34L16 16.34V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h1.34l-3-3"/>
+          <polygon points="23 7 16 12 23 17 23 7"/>
+        </svg>
+      </button>
+
+      <!-- Screen Share -->
+      <button type="button" class="call-ctrl-btn" id="call-screen-share-btn" title="Share Screen" aria-label="Share Screen">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+          <line x1="8" y1="21" x2="16" y2="21"/>
+          <line x1="12" y1="17" x2="12" y2="21"/>
+          <polyline points="9 8 12 5 15 8"/>
+          <line x1="12" y1="5" x2="12" y2="13"/>
+        </svg>
+      </button>
+
+      <!-- Hangup Call -->
+      <button type="button" class="call-ctrl-btn call-hangup-btn" id="call-hangup-btn" title="End Call" aria-label="End Call">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="1" y1="1" x2="23" y2="23"/>
+          <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"/>
+        </svg>
+      </button>
+    </div>
+  </div>
 
   <!-- Toasts container for notifications -->
   <div class="toasts" id="toasts" role="status" aria-live="polite"></div>

@@ -718,6 +718,22 @@ const io = new Server(server, {path: '/socket.io',
   connectTimeout: 15_000,});
 const onlineUsers = new Set(); // Set of userIds currently online
 
+// In-memory active calls and user-to-call mappings for WebRTC signaling
+const activeCalls = new Map(); // callId -> callRecord
+const userActiveCalls = new Map(); // userId -> callId
+
+function cleanupCall(callId, reason = 'ended') {
+  const call = activeCalls.get(callId);
+  if (!call) return null;
+  if (call.timeoutTimer) {
+    clearTimeout(call.timeoutTimer);
+  }
+  activeCalls.delete(callId);
+  userActiveCalls.delete(call.callerId);
+  userActiveCalls.delete(call.calleeId);
+  return call;
+}
+
 const routeContext = {
   app, pool, fs, path, UPLOADS_DIR, PREFIX, ADMIN_PHONE, io, onlineUsers,
   authMiddleware, adminMiddleware, sanitizePhone, normalizePhoneForStorage,
@@ -1239,10 +1255,187 @@ io.on('connection', async (socket) => {
     } catch (e) {}
   });
 
+  /* ---------------------- WebRTC Calling Signaling ---------------------- */
+
+  // Initiate call
+  socket.on('call_initiate', async (payload, ack) => {
+    const reply = typeof ack === 'function' ? ack : () => {};
+    const targetUserId = Number(payload && payload.targetUserId);
+    const convId = Number(payload && payload.conversationId);
+    const callType = (payload && payload.callType) === 'video' ? 'video' : 'audio';
+
+    if (!targetUserId || !convId) {
+      return reply({ ok: false, error: 'Invalid call target' });
+    }
+    if (targetUserId === user.id) {
+      return reply({ ok: false, error: 'Cannot call yourself' });
+    }
+
+    if (userActiveCalls.has(user.id)) {
+      return reply({ ok: false, error: 'You are already in a call' });
+    }
+
+    if (!onlineUsers.has(targetUserId)) {
+      return reply({ ok: false, error: 'User is currently offline' });
+    }
+
+    if (userActiveCalls.has(targetUserId)) {
+      return reply({ ok: false, error: 'User is busy on another call', isBusy: true });
+    }
+
+    try {
+      const { rows } = await pool.query(
+        `SELECT user_id FROM chat_conversation_members
+         WHERE conversation_id = $1 AND user_id IN ($2, $3)`,
+        [convId, user.id, targetUserId]
+      );
+      if (rows.length < 2) {
+        return reply({ ok: false, error: 'Both users must be members of the conversation' });
+      }
+    } catch (err) {
+      console.error('Call initiate error:', err);
+      return reply({ ok: false, error: 'Could not initiate call' });
+    }
+
+    const callId = `call_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+    const callRecord = {
+      id: callId,
+      callerId: user.id,
+      calleeId: targetUserId,
+      conversationId: convId,
+      callType,
+      status: 'ringing',
+      createdAt: Date.now(),
+      timeoutTimer: null,
+    };
+
+    // Auto-timeout after 45 seconds if unanswered
+    callRecord.timeoutTimer = setTimeout(() => {
+      const active = activeCalls.get(callId);
+      if (active && active.status === 'ringing') {
+        cleanupCall(callId, 'timeout');
+        io.to(`u:${user.id}`).emit('call_rejected', { callId, reason: 'no-answer' });
+        io.to(`u:${targetUserId}`).emit('call_ended', { callId, reason: 'missed' });
+      }
+    }, 45000);
+
+    activeCalls.set(callId, callRecord);
+    userActiveCalls.set(user.id, callId);
+    userActiveCalls.set(targetUserId, callId);
+
+    // Notify callee
+    io.to(`u:${targetUserId}`).emit('call_incoming', {
+      callId,
+      caller: {
+        id: user.id,
+        name: user.name,
+        phone: user.phone,
+        avatarUrl: user.avatar_url,
+        avatarColor: user.avatar_color,
+      },
+      conversationId: convId,
+      callType,
+    });
+
+    reply({ ok: true, callId });
+  });
+
+  // Accept call
+  socket.on('call_accept', (payload, ack) => {
+    const reply = typeof ack === 'function' ? ack : () => {};
+    const callId = payload && payload.callId;
+    const call = activeCalls.get(callId);
+
+    if (!call || call.calleeId !== user.id) {
+      return reply({ ok: false, error: 'Call no longer active' });
+    }
+
+    if (call.timeoutTimer) {
+      clearTimeout(call.timeoutTimer);
+      call.timeoutTimer = null;
+    }
+
+    call.status = 'active';
+    call.acceptedAt = Date.now();
+
+    io.to(`u:${call.callerId}`).emit('call_accepted', {
+      callId,
+      callee: {
+        id: user.id,
+        name: user.name,
+        phone: user.phone,
+        avatarUrl: user.avatar_url,
+        avatarColor: user.avatar_color,
+      },
+    });
+
+    reply({ ok: true });
+  });
+
+  // Reject / Decline call
+  socket.on('call_reject', (payload, ack) => {
+    const reply = typeof ack === 'function' ? ack : () => {};
+    const callId = payload && payload.callId;
+    const reason = (payload && payload.reason) || 'declined';
+    const call = activeCalls.get(callId);
+
+    if (!call) return reply({ ok: false, error: 'Call not found' });
+
+    cleanupCall(callId, reason);
+
+    const targetId = (call.callerId === user.id) ? call.calleeId : call.callerId;
+    io.to(`u:${targetId}`).emit('call_rejected', { callId, reason });
+
+    reply({ ok: true });
+  });
+
+  // WebRTC Signaling Relay (SDP offer/answer, ICE candidates)
+  socket.on('call_signal', (payload) => {
+    const callId = payload && payload.callId;
+    const signal = payload && payload.signal;
+    if (!callId || !signal) return;
+
+    const call = activeCalls.get(callId);
+    if (!call) return;
+
+    const targetUserId = (call.callerId === user.id) ? call.calleeId : call.callerId;
+    io.to(`u:${targetUserId}`).emit('call_signal', {
+      callId,
+      senderId: user.id,
+      signal,
+    });
+  });
+
+  // End active call
+  socket.on('call_end', (payload, ack) => {
+    const reply = typeof ack === 'function' ? ack : () => {};
+    const callId = payload && payload.callId;
+    const reason = (payload && payload.reason) || 'hangup';
+    const call = activeCalls.get(callId);
+
+    if (call) {
+      cleanupCall(callId, reason);
+      const peerId = (call.callerId === user.id) ? call.calleeId : call.callerId;
+      io.to(`u:${peerId}`).emit('call_ended', { callId, reason });
+    }
+
+    reply({ ok: true });
+  });
+
   // Disconnect
   socket.on('disconnect', () => {
     onlineUsers.delete(user.id);
     io.emit('user_status', { userId: user.id, isOnline: false });
+
+    // Clean up call if disconnecting while active/ringing
+    if (userActiveCalls.has(user.id)) {
+      const callId = userActiveCalls.get(user.id);
+      const call = cleanupCall(callId, 'disconnected');
+      if (call) {
+        const peerId = (call.callerId === user.id) ? call.calleeId : call.callerId;
+        io.to(`u:${peerId}`).emit('call_ended', { callId, reason: 'disconnected' });
+      }
+    }
   });
 });
 
