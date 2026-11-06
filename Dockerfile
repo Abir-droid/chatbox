@@ -8,7 +8,8 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
-COPY server.js ./
+COPY server.js session.js ./
+COPY routes ./routes
 COPY views ./views
 COPY public ./public
 RUN mkdir -p public/uploads && chown -R node:node public/uploads

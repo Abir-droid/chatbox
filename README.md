@@ -46,6 +46,13 @@ A self-hosted, full-featured real-time chat application with phone number authen
 ```
 chatbox/
 ├── server.js            Express + Socket.IO + PostgreSQL backend
+├── routes/              HTTP routes grouped by feature
+│   ├── auth.js           Registration, login, and password recovery
+│   ├── contacts.js       Profiles, friends, and friend requests
+│   ├── conversations.js  Direct and group conversations
+│   ├── messages.js       Message history, media, edits, and reactions
+│   └── admin.js          Moderation and audit endpoints
+├── session.js           Signed session token creation and validation
 ├── views/index.html     App template (dynamic {{BASE}} for subpaths)
 ├── public/
 │   ├── app.js           Frontend application logic
@@ -54,7 +61,8 @@ chatbox/
 │   ├── favicon.svg      Vector icon
 │   ├── fonts/           Self-hosted Figtree & Bricolage Grotesque fonts
 │   └── uploads/         Uploaded media files (.gitignored)
-├── test.js              Automated 8-phase test suite (npm test)
+├── test/                Session token tests (npm test)
+├── docs/architecture.md Project map and deployment notes
 ├── Dockerfile           Alpine production container for Coolify
 ├── .env.example         Environment template
 └── package.json
@@ -70,7 +78,7 @@ Requirements: Node.js 22.9+ (`node -v`).
 # 1. Install dependencies
 npm install
 
-# 2. Run automated test suite (uses built-in pg-mem emulator; no database setup needed!)
+# 2. Run the automated session token tests
 npm test
 
 # 3. Start local development server
@@ -91,3 +99,5 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 | **Domain** | `https://abirdroid.ddns.net/chatbox` |
 | **Ports Exposes** | `3000` |
 | **Environment Variables** | `APPLICATION_ROOT=/chatbox`<br>`DATABASE_URL=postgres://user:password@pg-host:5432/chatbox`<br>`ADMIN_PHONE=+1234567890` *(optional; designates initial admin)* |
+
+The session signing key is generated once and stored in PostgreSQL automatically. Existing Coolify deployments need no new setting. If you choose to set `SESSION_SECRET`, use the same unique value (at least 32 characters) on every app replica.

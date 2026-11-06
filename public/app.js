@@ -5641,7 +5641,13 @@
         renderAvatar(avatar, m.name, m.avatarColor, m.avatarUrl, m.isOnline);
 
         const info = document.createElement('div');
-        info.innerHTML = `<strong>${m.name}</strong> <span style="font-size:0.78rem;color:var(--muted)">(${m.phone})</span>`;
+        const memberName = document.createElement('strong');
+        memberName.textContent = m.name || '';
+        const memberPhone = document.createElement('span');
+        memberPhone.style.fontSize = '0.78rem';
+        memberPhone.style.color = 'var(--muted)';
+        memberPhone.textContent = `(${m.phone || ''})`;
+        info.append(memberName, document.createTextNode(' '), memberPhone);
 
         left.append(avatar, info);
 
@@ -5712,7 +5718,9 @@
         const tr = document.createElement('tr');
 
         const tdName = document.createElement('td');
-        tdName.innerHTML = `<strong>${u.name}</strong>`;
+        const userName = document.createElement('strong');
+        userName.textContent = u.name || '';
+        tdName.appendChild(userName);
 
         const tdPhone = document.createElement('td');
         tdPhone.textContent = u.phone;
