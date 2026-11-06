@@ -259,9 +259,10 @@
     incomingAcceptBtn: $('incoming-accept-btn'),
 
     activeCallOverlay: $('active-call-overlay'),
+    activeCallMiniAvatar: $('active-call-mini-avatar'),
     activeCallBadge: $('active-call-badge'),
+    activeCallPillTimer: $('active-call-pill-timer'),
     activeCallPeerName: $('active-call-peer-name'),
-    activeCallStatus: $('active-call-status'),
     activeCallMinBtn: $('active-call-min-btn'),
     activeCallViewport: $('active-call-viewport'),
     activeCallRemoteVideo: $('active-call-remote-video'),
@@ -6281,13 +6282,36 @@
     if (!callState.startTime) return;
     const elapsedSec = Math.floor((Date.now() - callState.startTime) / 1000);
     const formatted = formatCallDuration(elapsedSec);
-    if (el.activeCallStatus) el.activeCallStatus.textContent = formatted;
     if (el.activeCallCenterTimer) el.activeCallCenterTimer.textContent = formatted;
+    if (el.activeCallPillTimer) {
+      el.activeCallPillTimer.textContent = '• ' + formatted;
+      el.activeCallPillTimer.hidden = false;
+    }
   }
 
   function setCallStatusText(text) {
-    if (el.activeCallStatus) el.activeCallStatus.textContent = text;
     if (el.activeCallCenterTimer) el.activeCallCenterTimer.textContent = text;
+  }
+
+  function updateRemoteMediaDisplay() {
+    const hasVideoTrack = callState.remoteStream && callState.remoteStream.getVideoTracks().some(
+      (t) => t.readyState === 'live' && !t.muted
+    );
+    if (hasVideoTrack) {
+      if (el.activeCallRemoteVideo) {
+        el.activeCallRemoteVideo.setAttribute('data-has-stream', 'true');
+      }
+      if (el.activeCallAvatarView) {
+        el.activeCallAvatarView.style.display = 'none';
+      }
+    } else {
+      if (el.activeCallRemoteVideo) {
+        el.activeCallRemoteVideo.removeAttribute('data-has-stream');
+      }
+      if (el.activeCallAvatarView) {
+        el.activeCallAvatarView.style.display = 'flex';
+      }
+    }
   }
 
   function openActiveCallOverlay({ isInitiator, callType, peerName, peerAvatarUrl, peerAvatarColor }) {
@@ -6298,16 +6322,23 @@
     callState.peerAvatarUrl = peerAvatarUrl;
     callState.peerAvatarColor = peerAvatarColor;
     callState.isMuted = false;
-    callState.isCameraOff = false;
+    callState.isCameraOff = callType !== 'video';
     callState.isScreenSharing = false;
     callState.isMinimized = false;
 
     if (el.activeCallBadge) el.activeCallBadge.textContent = callType === 'video' ? 'Video Call' : 'Voice Call';
+    if (el.activeCallPillTimer) {
+      el.activeCallPillTimer.textContent = '';
+      el.activeCallPillTimer.hidden = true;
+    }
     if (el.activeCallPeerName) el.activeCallPeerName.textContent = peerName;
     if (el.activeCallCenterTitle) el.activeCallCenterTitle.textContent = peerName;
 
     if (el.activeCallCenterAvatar) {
       renderAvatar(el.activeCallCenterAvatar, peerName, peerAvatarColor, peerAvatarUrl, false);
+    }
+    if (el.activeCallMiniAvatar) {
+      renderAvatar(el.activeCallMiniAvatar, peerName, peerAvatarColor, peerAvatarUrl, false);
     }
 
     setCallStatusText(isInitiator ? 'Calling…' : 'Connecting…');
@@ -6319,14 +6350,17 @@
       if (micOn) micOn.hidden = false;
       if (micOff) micOff.hidden = true;
     }
+
+    // Video camera button is available in both voice and video calls
     if (el.callToggleCamBtn) {
-      el.callToggleCamBtn.classList.remove('active-off');
-      el.callToggleCamBtn.style.display = callType === 'video' ? 'flex' : 'none';
+      el.callToggleCamBtn.style.display = 'flex';
+      el.callToggleCamBtn.classList.toggle('active-off', callState.isCameraOff);
       const camOn = el.callToggleCamBtn.querySelector('.ctrl-icon-cam-on');
       const camOff = el.callToggleCamBtn.querySelector('.ctrl-icon-cam-off');
-      if (camOn) camOn.hidden = false;
-      if (camOff) camOff.hidden = true;
+      if (camOn) camOn.hidden = callState.isCameraOff;
+      if (camOff) camOff.hidden = !callState.isCameraOff;
     }
+
     if (el.callScreenShareBtn) {
       el.callScreenShareBtn.classList.remove('active-off');
       el.callScreenShareBtn.style.display = (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) ? 'flex' : 'none';
@@ -6348,6 +6382,10 @@
 
     if (el.activeCallOverlay) {
       el.activeCallOverlay.classList.remove('minimized');
+      el.activeCallOverlay.style.left = '';
+      el.activeCallOverlay.style.top = '';
+      el.activeCallOverlay.style.right = '';
+      el.activeCallOverlay.style.bottom = '';
       el.activeCallOverlay.hidden = false;
     }
   }
@@ -6378,21 +6416,29 @@
     };
 
     pc.ontrack = (event) => {
-      const stream = event.streams[0];
-      callState.remoteStream = stream;
+      let stream = event.streams[0];
+      if (!stream) {
+        if (!callState.remoteStream) callState.remoteStream = new MediaStream();
+        callState.remoteStream.addTrack(event.track);
+        stream = callState.remoteStream;
+      } else {
+        callState.remoteStream = stream;
+      }
 
       if (el.activeCallRemoteAudio) {
         el.activeCallRemoteAudio.srcObject = stream;
         el.activeCallRemoteAudio.play().catch(() => {});
       }
 
-      if (el.activeCallRemoteVideo && event.track.kind === 'video') {
-        el.activeCallRemoteVideo.srcObject = stream;
-        el.activeCallRemoteVideo.setAttribute('data-has-stream', 'true');
-        el.activeCallRemoteVideo.play().catch(() => {});
-        if (el.activeCallAvatarView) {
-          el.activeCallAvatarView.style.display = 'none';
+      if (event.track.kind === 'video') {
+        if (el.activeCallRemoteVideo) {
+          el.activeCallRemoteVideo.srcObject = stream;
+          el.activeCallRemoteVideo.play().catch(() => {});
         }
+        event.track.onmute = () => updateRemoteMediaDisplay();
+        event.track.onunmute = () => updateRemoteMediaDisplay();
+        event.track.onended = () => updateRemoteMediaDisplay();
+        updateRemoteMediaDisplay();
       }
     };
 
@@ -6413,6 +6459,20 @@
     };
 
     return pc;
+  }
+
+  async function renegotiateOffer() {
+    if (!callState.pc || !callState.callId || !socket) return;
+    try {
+      const offer = await callState.pc.createOffer();
+      await callState.pc.setLocalDescription(offer);
+      socket.emit('call_signal', {
+        callId: callState.callId,
+        signal: { sdp: callState.pc.localDescription },
+      });
+    } catch (err) {
+      console.warn('Renegotiate offer error:', err);
+    }
   }
 
   async function initiateCall(callType) {
@@ -6741,6 +6801,10 @@
 
     if (el.activeCallOverlay) {
       el.activeCallOverlay.classList.remove('minimized');
+      el.activeCallOverlay.style.left = '';
+      el.activeCallOverlay.style.top = '';
+      el.activeCallOverlay.style.right = '';
+      el.activeCallOverlay.style.bottom = '';
       el.activeCallOverlay.hidden = true;
     }
   }
@@ -6762,13 +6826,77 @@
     }
   }
 
-  function toggleCallCam() {
-    if (!callState.localStream) return;
-    const videoTrack = callState.localStream.getVideoTracks()[0];
-    if (!videoTrack) return;
+  async function toggleCallCam() {
+    if (!callState.active || !callState.pc) return;
 
-    callState.isCameraOff = !callState.isCameraOff;
-    videoTrack.enabled = !callState.isCameraOff;
+    if (callState.isCameraOff) {
+      // Turn Camera ON (supports 1-sided camera in voice calls too!)
+      try {
+        const camStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+        });
+        const camTrack = camStream.getVideoTracks()[0];
+        if (!camTrack) return;
+
+        if (!callState.localStream) {
+          callState.localStream = new MediaStream();
+        }
+        callState.localStream.getVideoTracks().forEach((t) => {
+          try { t.stop(); } catch {}
+          callState.localStream.removeTrack(t);
+        });
+        callState.localStream.addTrack(camTrack);
+        callState.isCameraOff = false;
+
+        let sender = callState.pc.getSenders().find(
+          (s) => (s.track && s.track.kind === 'video') || s.kind === 'video'
+        );
+
+        if (sender) {
+          await sender.replaceTrack(camTrack);
+        } else {
+          // No video sender existed -> add track and renegotiate with peer!
+          callState.pc.addTrack(camTrack, callState.localStream);
+          await renegotiateOffer();
+        }
+
+        if (el.activeCallPip) {
+          el.activeCallPip.hidden = false;
+          el.activeCallPip.style.opacity = '1';
+          if (el.activeCallLocalVideo) {
+            el.activeCallLocalVideo.srcObject = new MediaStream([camTrack]);
+            el.activeCallLocalVideo.play().catch(() => {});
+          }
+        }
+
+        camTrack.onended = () => {
+          if (!callState.isCameraOff) toggleCallCam();
+        };
+      } catch (err) {
+        console.warn('Could not start camera:', err);
+        return toast('Could not access camera');
+      }
+    } else {
+      // Turn Camera OFF
+      callState.isCameraOff = true;
+      if (callState.localStream) {
+        callState.localStream.getVideoTracks().forEach((t) => {
+          try { t.stop(); } catch {}
+          callState.localStream.removeTrack(t);
+        });
+      }
+
+      const sender = callState.pc.getSenders().find(
+        (s) => (s.track && s.track.kind === 'video') || s.kind === 'video'
+      );
+      if (sender) {
+        await sender.replaceTrack(null);
+      }
+
+      if (el.activeCallPip && !callState.isScreenSharing) {
+        el.activeCallPip.hidden = true;
+      }
+    }
 
     if (el.callToggleCamBtn) {
       el.callToggleCamBtn.classList.toggle('active-off', callState.isCameraOff);
@@ -6777,10 +6905,6 @@
       if (onIcon) onIcon.hidden = callState.isCameraOff;
       if (offIcon) offIcon.hidden = !callState.isCameraOff;
     }
-
-    if (el.activeCallPip) {
-      el.activeCallPip.style.opacity = callState.isCameraOff ? '0.3' : '1';
-    }
   }
 
   async function toggleScreenShare() {
@@ -6788,8 +6912,13 @@
 
     if (!callState.isScreenSharing) {
       try {
-        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+          video: { cursor: 'always' },
+          audio: false,
+        });
         const screenTrack = stream.getVideoTracks()[0];
+        if (!screenTrack) return;
+
         callState.screenStream = stream;
         callState.isScreenSharing = true;
 
@@ -6797,32 +6926,46 @@
           el.callScreenShareBtn.classList.add('active-off');
         }
 
-        const sender = callState.pc.getSenders().find((s) => s.track && s.track.kind === 'video');
+        let sender = callState.pc.getSenders().find(
+          (s) => (s.track && s.track.kind === 'video') || s.kind === 'video'
+        );
+
         if (sender) {
-          sender.replaceTrack(screenTrack);
+          await sender.replaceTrack(screenTrack);
+        } else {
+          // No video sender existed (e.g. voice call) -> Add track and renegotiate SDP!
+          callState.pc.addTrack(screenTrack, stream);
+          await renegotiateOffer();
         }
 
-        if (el.activeCallLocalVideo) {
-          el.activeCallLocalVideo.srcObject = stream;
+        if (el.activeCallPip) {
+          el.activeCallPip.hidden = false;
+          el.activeCallPip.style.opacity = '1';
+          if (el.activeCallLocalVideo) {
+            el.activeCallLocalVideo.srcObject = stream;
+            el.activeCallLocalVideo.play().catch(() => {});
+          }
         }
 
         screenTrack.onended = () => {
           revertScreenShare();
         };
       } catch (err) {
-        console.warn('Screen share error:', err);
+        console.warn('Screen share cancelled or failed:', err);
       }
     } else {
-      revertScreenShare();
+      await revertScreenShare();
     }
   }
 
-  function revertScreenShare() {
+  async function revertScreenShare() {
     if (!callState.isScreenSharing) return;
     callState.isScreenSharing = false;
 
     if (callState.screenStream) {
-      callState.screenStream.getTracks().forEach((t) => t.stop());
+      callState.screenStream.getTracks().forEach((t) => {
+        try { t.stop(); } catch {}
+      });
       callState.screenStream = null;
     }
 
@@ -6830,15 +6973,25 @@
       el.callScreenShareBtn.classList.remove('active-off');
     }
 
-    if (callState.localStream && callState.pc) {
+    const sender = callState.pc?.getSenders().find(
+      (s) => (s.track && s.track.kind === 'video') || s.kind === 'video'
+    );
+
+    if (callState.localStream && !callState.isCameraOff) {
       const camTrack = callState.localStream.getVideoTracks()[0];
-      const sender = callState.pc.getSenders().find((s) => s.track && s.track.kind === 'video');
-      if (sender && camTrack) {
-        sender.replaceTrack(camTrack);
+      if (camTrack && sender) {
+        await sender.replaceTrack(camTrack);
+        if (el.activeCallLocalVideo) {
+          el.activeCallLocalVideo.srcObject = callState.localStream;
+        }
+        if (el.activeCallPip) el.activeCallPip.hidden = false;
+      } else {
+        if (sender) await sender.replaceTrack(null);
+        if (el.activeCallPip) el.activeCallPip.hidden = true;
       }
-      if (el.activeCallLocalVideo) {
-        el.activeCallLocalVideo.srcObject = callState.localStream;
-      }
+    } else {
+      if (sender) await sender.replaceTrack(null);
+      if (el.activeCallPip) el.activeCallPip.hidden = true;
     }
   }
 
@@ -6846,6 +6999,94 @@
     if (!el.activeCallOverlay) return;
     callState.isMinimized = !callState.isMinimized;
     el.activeCallOverlay.classList.toggle('minimized', callState.isMinimized);
+    if (!callState.isMinimized) {
+      el.activeCallOverlay.style.left = '';
+      el.activeCallOverlay.style.top = '';
+      el.activeCallOverlay.style.right = '';
+      el.activeCallOverlay.style.bottom = '';
+    }
+  }
+
+  // Mouse & Touch Dragging for Minimized Call Window
+  let dragData = {
+    isDragging: false,
+    hasMoved: false,
+    startX: 0,
+    startY: 0,
+    initialLeft: 0,
+    initialTop: 0,
+  };
+
+  function initMinimizedDragging() {
+    if (!el.activeCallOverlay) return;
+
+    const onDragStart = (e) => {
+      if (!callState.isMinimized) return;
+      if (e.target.closest('button')) return;
+
+      const clientX = e.type.startsWith('touch') ? e.touches[0].clientX : e.clientX;
+      const clientY = e.type.startsWith('touch') ? e.touches[0].clientY : e.clientY;
+
+      const rect = el.activeCallOverlay.getBoundingClientRect();
+      dragData.isDragging = true;
+      dragData.hasMoved = false;
+      dragData.startX = clientX;
+      dragData.startY = clientY;
+      dragData.initialLeft = rect.left;
+      dragData.initialTop = rect.top;
+
+      window.addEventListener('mousemove', onDragMove, { passive: false });
+      window.addEventListener('mouseup', onDragEnd);
+      window.addEventListener('touchmove', onDragMove, { passive: false });
+      window.addEventListener('touchend', onDragEnd);
+    };
+
+    const onDragMove = (e) => {
+      if (!dragData.isDragging) return;
+
+      const clientX = e.type.startsWith('touch') ? e.touches[0].clientX : e.clientX;
+      const clientY = e.type.startsWith('touch') ? e.touches[0].clientY : e.clientY;
+
+      const dx = clientX - dragData.startX;
+      const dy = clientY - dragData.startY;
+
+      if (Math.hypot(dx, dy) > 5) {
+        dragData.hasMoved = true;
+        el.activeCallOverlay.classList.add('is-dragging');
+      }
+
+      if (dragData.hasMoved) {
+        if (e.cancelable) e.preventDefault();
+        const overlayWidth = el.activeCallOverlay.offsetWidth || 320;
+        const overlayHeight = el.activeCallOverlay.offsetHeight || 76;
+        const minLeft = 10;
+        const maxLeft = Math.max(10, window.innerWidth - overlayWidth - 10);
+        const minTop = 10;
+        const maxTop = Math.max(10, window.innerHeight - overlayHeight - 10);
+
+        const newLeft = Math.min(Math.max(dragData.initialLeft + dx, minLeft), maxLeft);
+        const newTop = Math.min(Math.max(dragData.initialTop + dy, minTop), maxTop);
+
+        el.activeCallOverlay.style.left = `${newLeft}px`;
+        el.activeCallOverlay.style.top = `${newTop}px`;
+        el.activeCallOverlay.style.right = 'auto';
+        el.activeCallOverlay.style.bottom = 'auto';
+      }
+    };
+
+    const onDragEnd = () => {
+      if (!dragData.isDragging) return;
+      dragData.isDragging = false;
+      el.activeCallOverlay.classList.remove('is-dragging');
+
+      window.removeEventListener('mousemove', onDragMove);
+      window.removeEventListener('mouseup', onDragEnd);
+      window.removeEventListener('touchmove', onDragMove);
+      window.removeEventListener('touchend', onDragEnd);
+    };
+
+    el.activeCallOverlay.addEventListener('mousedown', onDragStart);
+    el.activeCallOverlay.addEventListener('touchstart', onDragStart, { passive: true });
   }
 
   // Bind Calling UI Event Listeners
@@ -6880,12 +7121,19 @@
     };
   }
   if (el.activeCallOverlay) {
-    el.activeCallOverlay.onclick = () => {
+    el.activeCallOverlay.onclick = (e) => {
+      if (e.target.closest('button')) return;
+      if (dragData.hasMoved) {
+        dragData.hasMoved = false;
+        return;
+      }
       if (callState.isMinimized) {
         toggleMinimizeCall();
       }
     };
   }
+
+  initMinimizedDragging();
 
   /* ------------------------------------------------------------- init */
   if (!document.documentElement.getAttribute('data-theme')) {
