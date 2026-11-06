@@ -4345,7 +4345,6 @@ dialog.lightbox-dialog::backdrop {
   width: 440px;
   max-width: 95vw;
   padding: 1.4rem 1.65rem;
-  overflow: visible;
 }
 
 #profile-dialog .dialog-header {
@@ -4368,9 +4367,16 @@ dialog.lightbox-dialog::backdrop {
   position: relative;
   cursor: pointer;
   border-radius: 50%;
-  overflow: hidden;
+  overflow: visible;
   width: 68px;
   height: 68px;
+}
+
+.profile-avatar-preview-wrap > .avatar {
+  width: 100%;
+  min-width: 100%;
+  height: 100%;
+  overflow: hidden;
 }
 
 .profile-avatar-preview-wrap:hover .profile-upload-trigger {
@@ -4379,28 +4385,40 @@ dialog.lightbox-dialog::backdrop {
 
 .profile-upload-trigger {
   position: absolute;
-  inset: 0;
+  right: -3px;
+  bottom: -3px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(2px);
+  border: 2px solid var(--surface);
+  background: var(--accent);
   color: #ffffff;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  opacity: 0.92;
-  font-size: 0.68rem;
-  font-weight: 600;
-  transition: opacity 0.15s ease;
+  opacity: 1;
+  box-shadow: 0 3px 10px rgba(10, 132, 255, 0.4);
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+  cursor: pointer;
 }
 
 .profile-upload-trigger svg {
-  width: 18px;
-  height: 18px;
+  width: 14px;
+  height: 14px;
   stroke: currentColor;
-  stroke-width: 2;
+  stroke-width: 2.2;
   fill: none;
+}
+
+.profile-upload-trigger:hover {
+  transform: scale(1.08);
+  box-shadow: 0 4px 13px rgba(10, 132, 255, 0.55);
+}
+
+.profile-upload-trigger:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
 }
 
 .avatar-palette {
@@ -5638,7 +5656,7 @@ dialog.lightbox-dialog::backdrop {
   position: relative;
   cursor: pointer;
   border-radius: 50%;
-  overflow: hidden;
+  overflow: visible;
   width: 72px;
   height: 72px;
 }
@@ -6371,8 +6389,8 @@ button:active {
 }
 
 .rail {
-  width: 304px;
-  min-width: 304px;
+  width: clamp(248px, 25vw, 304px);
+  min-width: 248px;
   max-width: 304px;
   background: var(--rail-bg);
   border-right-color: var(--rail-line);
@@ -6483,16 +6501,16 @@ button:active {
   transition: none;
 }
 
-.avatar.c-0 { background: #a66363; }
-.avatar.c-1 { background: #aa7751; }
-.avatar.c-2 { background: #9a864f; }
-.avatar.c-3 { background: #5f856e; }
-.avatar.c-4 { background: #4f8587; }
-.avatar.c-5 { background: #55799c; }
-.avatar.c-6 { background: #786f9a; }
-.avatar.c-7 { background: #9a6c84; }
-.avatar.c-8 { background: #687b96; }
-.avatar.c-9 { background: #4f897c; }
+.avatar.c-0 { background: linear-gradient(145deg, #fa637c 0%, #d92f53 52%, #a5193e 100%); }
+.avatar.c-1 { background: linear-gradient(145deg, #ffab58 0%, #d66a1d 52%, #a33f0b 100%); }
+.avatar.c-2 { background: linear-gradient(145deg, #e8c94d 0%, #b98b16 52%, #755609 100%); }
+.avatar.c-3 { background: linear-gradient(145deg, #48d58d 0%, #118354 52%, #075c3c 100%); }
+.avatar.c-4 { background: linear-gradient(145deg, #3fc9d7 0%, #0b8999 52%, #075f70 100%); }
+.avatar.c-5 { background: linear-gradient(145deg, #67b4ff 0%, #276cd4 52%, #17469f 100%); }
+.avatar.c-6 { background: linear-gradient(145deg, #ad8cff 0%, #754bd1 52%, #4d2c99 100%); }
+.avatar.c-7 { background: linear-gradient(145deg, #f46db5 0%, #c13c83 52%, #8c225c 100%); }
+.avatar.c-8 { background: linear-gradient(145deg, #8495ff 0%, #5365d1 52%, #35439c 100%); }
+.avatar.c-9 { background: linear-gradient(145deg, #4ed7c2 0%, #138d7c 52%, #086254 100%); }
 
 .avatar.online::after {
   animation: none;
@@ -7069,5 +7087,102 @@ button:active {
 @media (max-width: 768px) {
   .thread-head, .composer {
     background: var(--glass-bg);
+  }
+}
+
+/* Keep responsive sizing rules after the visual overrides above. */
+@media (max-width: 768px) {
+  .log {
+    padding: 0.75rem 0.65rem;
+  }
+
+  .composer {
+    min-height: 54px;
+    padding: 0.45rem 0.6rem;
+    padding-bottom: max(0.45rem, env(safe-area-inset-bottom));
+    gap: 0.35rem;
+  }
+
+  .composer-btn {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    flex-shrink: 0;
+  }
+
+  .composer textarea {
+    height: 36px;
+    min-height: 36px;
+    max-height: 100px;
+    padding: 0.45rem 0.8rem;
+    border-radius: 18px;
+    line-height: 1.35;
+  }
+
+  .composer .send {
+    height: 36px;
+    min-height: 36px;
+    min-width: 88px;
+    padding: 0.45rem 0.85rem;
+    gap: 0.35rem;
+    border-radius: 18px;
+  }
+
+  .toasts {
+    bottom: calc(65px + max(0.5rem, env(safe-area-inset-bottom)));
+    right: 0.85rem;
+    left: 0.85rem;
+  }
+
+  dialog {
+    max-width: 95vw;
+    max-height: 92dvh;
+  }
+
+  .dialog-card {
+    max-height: min(92dvh, calc(100dvh - 2rem));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border-radius: 18px;
+  }
+
+  .dialog-header h2 {
+    font-size: 1.1rem;
+  }
+
+  .auth-title {
+    font-size: 1.7rem;
+  }
+
+  .auth-subtitle {
+    font-size: 0.85rem;
+  }
+
+  .auth-tabs {
+    margin-bottom: 1.25rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .auth-card {
+    padding: clamp(1rem, 5vw, 1.4rem);
+  }
+
+  .composer .send {
+    width: 38px;
+    height: 38px;
+    min-width: 38px;
+    min-height: 38px;
+    padding: 0;
+    justify-content: center;
+    border-radius: 50%;
+  }
+}
+
+@media (min-width: 481px) {
+  .chat-info-panel {
+    width: clamp(280px, 28vw, 340px);
+    min-width: 280px;
+    max-width: 340px;
   }
 }
