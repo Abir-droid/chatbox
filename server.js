@@ -584,6 +584,17 @@ const indexHtml = fs
   .replaceAll('{{BASE}}', PREFIX)
   .replaceAll('{{VERSION}}', ASSET_VERSION);
 
+function getIndexHtml() {
+  try {
+    const raw = fs.readFileSync(path.join(__dirname, 'views', 'index.html'), 'utf8');
+    return raw
+      .replaceAll('{{BASE}}', PREFIX)
+      .replaceAll('{{VERSION}}', String(Date.now()));
+  } catch {
+    return indexHtml;
+  }
+}
+
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', true);
@@ -831,8 +842,8 @@ async function getMessagesReactions(messageIds) {
 
 // Page HTML
 app.get('/', (req, res) => {
-  res.set('Cache-Control', 'no-cache');
-  res.type('html').send(indexHtml);
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  res.type('html').send(getIndexHtml());
 });
 
 app.use((req, res) => res.status(404).type('text').send('Not found'));

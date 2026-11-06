@@ -6320,12 +6320,14 @@
 
     if (el.callToggleCamBtn) {
       el.callToggleCamBtn.style.display = 'flex';
-      el.callToggleCamBtn.classList.toggle('active-off', callState.isCameraOff);
+      const isVideoActive = !callState.isCameraOff;
+      el.callToggleCamBtn.classList.toggle('active-on', isVideoActive);
+      el.callToggleCamBtn.classList.remove('active-off');
       const camOn = el.callToggleCamBtn.querySelector('.ctrl-icon-cam-on');
       const camOff = el.callToggleCamBtn.querySelector('.ctrl-icon-cam-off');
-      if (camOn) camOn.hidden = callState.isCameraOff;
-      if (camOff) camOff.hidden = !callState.isCameraOff;
-      el.callToggleCamBtn.title = callState.isCameraOff ? 'Turn Camera On' : 'Turn Camera Off';
+      if (camOn) camOn.hidden = !isVideoActive;
+      if (camOff) camOff.hidden = isVideoActive;
+      el.callToggleCamBtn.title = isVideoActive ? 'Turn Camera Off' : 'Turn Camera On';
       el.callToggleCamBtn.setAttribute('aria-label', el.callToggleCamBtn.title);
     }
 
