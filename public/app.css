@@ -1,146 +1,132 @@
 /* chatbox — ultra-modern responsive messaging app */
-/* Theme: Neutral light surfaces and charcoal dark surfaces. */
-
-@font-face {
-  font-family: "Figtree";
-  src: url("fonts/figtree-latin-wght-normal.woff2") format("woff2");
-  font-weight: 300 900;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Bricolage Grotesque";
-  src: url("fonts/bricolage-grotesque-latin-wght-normal.woff2") format("woff2");
-  font-weight: 200 800;
-  font-style: normal;
-  font-display: swap;
-}
+/* Theme: iOS-inspired charcoal dark mode and crisp white light mode. */
 
 /* ------------------------------------------------------------ design tokens */
 :root {
-  --font-body: "Figtree", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-display: "Bricolage Grotesque", "Figtree", sans-serif;
+  color-scheme: light;
+  --font-body: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
 
-  /* Quiet neutral surfaces with a muted blue-green accent. */
-  --bg: #f4f6f7;
-  --bg-gradient: #f4f6f7;
+  /* iOS-inspired light surfaces and system blue. */
+  --bg: #f2f2f7;
+  --bg-gradient: #f2f2f7;
   --surface: #ffffff;
-  --surface-2: #f7f8f9;
-  --surface-3: #edf0f2;
-  --surface-hover: #f0f3f5;
+  --surface-2: #f8f8fa;
+  --surface-3: #e5e5ea;
+  --surface-hover: #f2f2f7;
   
-  --ink: #1f2933;
-  --ink-secondary: #45515d;
-  --muted: #74808b;
-  --line: #e2e7ea;
-  --line-light: #edf0f2;
-  --line-strong: #cbd3d8;
+  --ink: #1c1c1e;
+  --ink-secondary: #3a3a3c;
+  --muted: #8e8e93;
+  --line: #d1d1d6;
+  --line-light: #e5e5ea;
+  --line-strong: #aeaeb2;
 
-  --accent: #35647a;
-  --accent-hover: #2a5367;
-  --accent-active: #214354;
+  --accent: #007aff;
+  --accent-hover: #006ee6;
+  --accent-active: #005ec4;
   --accent-ink: #ffffff;
-  --accent-soft: #edf4f6;
-  --accent-soft-hover: #e2edf1;
-  --accent-border: #cfdee4;
-  --accent-glow: rgba(53, 100, 122, 0.14);
+  --accent-soft: #eaf3ff;
+  --accent-soft-hover: #dbeaff;
+  --accent-border: #c4dcff;
+  --accent-glow: rgba(0, 122, 255, 0.2);
+  --glass-bg: rgba(255, 255, 255, 0.86);
 
-  --danger: #bd4b4b;
-  --danger-hover: #a63e3e;
-  --danger-soft: #fbefef;
-  --danger-border: #e8caca;
-  --ok: #39745d;
-  --ok-soft: #edf5f0;
-  --warn: #9b6b2c;
-  --warn-soft: #faf4e9;
+  --danger: #ff3b30;
+  --danger-hover: #e63229;
+  --danger-soft: #fff0ef;
+  --danger-border: #ffd0cc;
+  --ok: #34c759;
+  --ok-soft: #eaf8ed;
+  --warn: #b87900;
+  --warn-soft: #fff5dd;
 
-  --shadow-sm: 0 1px 2px rgba(25, 38, 48, 0.045);
-  --shadow: 0 8px 24px rgba(25, 38, 48, 0.07);
-  --shadow-lg: 0 18px 48px rgba(25, 38, 48, 0.14);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.18);
 
-  --rail-bg: #ffffff;
-  --rail-surface: #f7f8f9;
-  --rail-ink: #26333d;
-  --rail-muted: #75818b;
-  --rail-line: #e8ecee;
-  --rail-hover: #f4f6f7;
-  --rail-active: #edf3f5;
-  --rail-active-ink: #315d72;
+  --rail-bg: rgba(247, 247, 250, 0.88);
+  --rail-surface: #eeeeF3;
+  --rail-ink: #1c1c1e;
+  --rail-muted: #8e8e93;
+  --rail-line: #dedee3;
+  --rail-hover: #ececf1;
+  --rail-active: #e4efff;
+  --rail-active-ink: #006ee6;
 
-  --bubble-own: #35647a;
+  --bubble-own: #007aff;
   --bubble-own-ink: #ffffff;
-  --bubble-own-shadow: 0 1px 2px rgba(31, 54, 67, 0.12);
+  --bubble-own-shadow: 0 2px 6px rgba(0, 122, 255, 0.18);
   --bubble-other: #ffffff;
-  --bubble-other-ink: #26333d;
-  --bubble-other-line: #e7ebed;
-  --bubble-other-shadow: 0 1px 2px rgba(25, 38, 48, 0.035);
+  --bubble-other-ink: #1c1c1e;
+  --bubble-other-line: #e1e1e6;
+  --bubble-other-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 
   /* Date badge in chat stream */
-  --date-badge-bg: #e9edef;
-  --date-badge-ink: #52606b;
-  --date-badge-border: #e1e6e8;
+  --date-badge-bg: rgba(142, 142, 147, 0.14);
+  --date-badge-ink: #636366;
+  --date-badge-border: transparent;
 }
 
 [data-theme="dark"] {
-  --bg: #15191d;
-  --bg-gradient: #15191d;
-  --surface: #1d2328;
-  --surface-2: #242b31;
-  --surface-3: #2d363d;
-  --surface-hover: #2a3238;
+  color-scheme: dark;
+  --bg: #000000;
+  --bg-gradient: #000000;
+  --surface: #1c1c1e;
+  --surface-2: #2c2c2e;
+  --surface-3: #3a3a3c;
+  --surface-hover: #303033;
 
-  --ink: #eef1f2;
-  --ink-secondary: #c2cbd0;
-  --muted: #909da5;
-  --line: #303a41;
-  --line-light: #293238;
-  --line-strong: #435058;
+  --ink: #f5f5f7;
+  --ink-secondary: #d1d1d6;
+  --muted: #98989d;
+  --line: #38383a;
+  --line-light: #2c2c2e;
+  --line-strong: #545458;
 
-  --accent: #8bb2c5;
-  --accent-hover: #a2c4d3;
-  --accent-active: #6d9bb1;
-  --accent-ink: #182329;
-  --accent-soft: #26353d;
-  --accent-soft-hover: #30434d;
-  --accent-border: #405862;
-  --accent-glow: rgba(139, 178, 197, 0.18);
+  --accent: #0a84ff;
+  --accent-hover: #2994ff;
+  --accent-active: #0066cc;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(10, 132, 255, 0.16);
+  --accent-soft-hover: rgba(10, 132, 255, 0.24);
+  --accent-border: rgba(10, 132, 255, 0.34);
+  --accent-glow: rgba(10, 132, 255, 0.24);
+  --glass-bg: rgba(28, 28, 30, 0.86);
 
-  --danger: #e18b86;
-  --danger-hover: #eea19b;
-  --danger-soft: #382a2a;
-  --danger-border: #61403e;
-  --ok: #8fc0a6;
-  --ok-soft: #27372e;
-  --warn: #d5b47f;
-  --warn-soft: #393226;
+  --danger: #ff453a;
+  --danger-hover: #ff6258;
+  --danger-soft: rgba(255, 69, 58, 0.16);
+  --danger-border: rgba(255, 69, 58, 0.34);
+  --ok: #30d158;
+  --ok-soft: rgba(48, 209, 88, 0.14);
+  --warn: #ffd60a;
+  --warn-soft: rgba(255, 214, 10, 0.14);
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.16);
-  --shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
-  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.34);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.24);
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.55);
 
-  /* Rail */
-  --rail-bg: #1b2126;
-  --rail-surface: #22292e;
-  --rail-ink: #eef1f2;
-  --rail-muted: #9aa6ad;
-  --rail-line: #2c353b;
-  --rail-hover: #252e34;
-  --rail-active: #293941;
-  --rail-active-ink: #a8c8d6;
+  --rail-bg: rgba(28, 28, 30, 0.9);
+  --rail-surface: #2c2c2e;
+  --rail-ink: #f5f5f7;
+  --rail-muted: #98989d;
+  --rail-line: #38383a;
+  --rail-hover: #2c2c2e;
+  --rail-active: rgba(10, 132, 255, 0.18);
+  --rail-active-ink: #409cff;
 
-  /* Bubbles */
-  --bubble-own: #426b7e;
+  --bubble-own: #0a84ff;
   --bubble-own-ink: #ffffff;
-  --bubble-own-shadow: 0 1px 2px rgba(0, 0, 0, 0.22);
-  --bubble-other: #20272c;
-  --bubble-other-ink: #edf1f2;
-  --bubble-other-line: #303a40;
-  --bubble-other-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+  --bubble-own-shadow: 0 2px 8px rgba(10, 132, 255, 0.2);
+  --bubble-other: #2c2c2e;
+  --bubble-other-ink: #f5f5f7;
+  --bubble-other-line: #38383a;
+  --bubble-other-shadow: none;
 
-  /* Date badge in chat stream */
-  --date-badge-bg: #293238;
-  --date-badge-ink: #d4dcdf;
-  --date-badge-border: #364148;
+  --date-badge-bg: rgba(142, 142, 147, 0.2);
+  --date-badge-ink: #d1d1d6;
+  --date-badge-border: transparent;
 }
 
 /* ------------------------------------------------------------------- base reset */
@@ -6254,7 +6240,7 @@ button {
 }
 
 button:active {
-  transform: none;
+  transform: scale(0.985);
 }
 
 :focus-visible {
@@ -6356,7 +6342,7 @@ button:active {
 .rail-search-wrap input, .composer textarea {
   border-radius: 9px;
   border-color: var(--line-strong);
-  background: var(--surface);
+  background: var(--glass-bg);
   box-shadow: none;
 }
 
@@ -6876,5 +6862,212 @@ button:active {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* iOS material polish: translucent chrome, familiar system blue, and crisp type. */
+.auth-screen {
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(10, 132, 255, 0.1), transparent 48%),
+    var(--bg);
+}
+
+[data-theme="dark"] .auth-screen {
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(10, 132, 255, 0.18), transparent 48%),
+    var(--bg);
+}
+
+.auth-card {
+  background: var(--glass-bg);
+  border-color: var(--line-light);
+  backdrop-filter: saturate(160%) blur(22px);
+  -webkit-backdrop-filter: saturate(160%) blur(22px);
+  box-shadow: 0 24px 70px rgba(18, 30, 44, 0.12);
+}
+
+[data-theme="dark"] .auth-card {
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+}
+
+.auth-logo-badge {
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+}
+
+.auth-logo-badge .brand-mark {
+  fill: var(--accent);
+}
+
+.auth-title {
+  font-size: 1.85rem;
+  font-weight: 700;
+  letter-spacing: -0.045em;
+}
+
+.auth-tab.active {
+  color: var(--accent);
+}
+
+.auth-submit, .dialog-actions .primary, .composer .send {
+  background: var(--accent);
+  color: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 3px 10px rgba(0, 122, 255, 0.2);
+}
+
+.auth-submit:hover, .dialog-actions .primary:hover, .composer .send:hover:not(:disabled) {
+  background: var(--accent-hover);
+  box-shadow: 0 5px 14px rgba(0, 122, 255, 0.25);
+}
+
+.rail {
+  background: var(--rail-bg);
+  backdrop-filter: saturate(180%) blur(22px);
+  -webkit-backdrop-filter: saturate(180%) blur(22px);
+  border-right-color: var(--rail-line);
+}
+
+.brand-icon-wrap {
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-border);
+}
+
+.brand-mark, .menu-btn svg.brand-mark, .menu-btn .menu-brand-icon {
+  fill: var(--accent);
+}
+
+.brand-name {
+  font-size: 1.22rem;
+  font-weight: 700;
+  letter-spacing: -0.045em;
+}
+
+.rail-search-wrap input {
+  background: var(--rail-surface);
+  border-radius: 11px;
+}
+
+.rail-nav {
+  border-bottom-color: var(--rail-line);
+}
+
+.nav-tab {
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+.chat-item, .friend-item {
+  border-radius: 12px;
+}
+
+.chat-item.active {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.chat-item.active .chat-item-name {
+  color: var(--rail-ink);
+}
+
+.thread-head, .composer {
+  background: var(--glass-bg);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+}
+
+.thread-head {
+  border-bottom-color: var(--line-light);
+}
+
+.thread, .log {
+  background: var(--bg);
+}
+
+.conv-avatar-wrap .avatar, .avatar-wrap .avatar {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.avatar.online::after {
+  width: 10px;
+  height: 10px;
+  background: var(--ok);
+  border: 2px solid var(--rail-bg);
+}
+
+.msg-row:not(.own) .bubble {
+  border-radius: 18px 18px 18px 5px !important;
+}
+
+.msg-row.own .bubble {
+  border-radius: 18px 18px 5px 18px !important;
+}
+
+.msg-row.own .bubble:not(.has-audio) {
+  background: var(--accent) !important;
+}
+
+.msg-row.own .bubble .bubble-meta {
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.composer {
+  border-top-color: var(--line-light);
+}
+
+.composer textarea {
+  background: var(--surface-2);
+  border-color: var(--line-light);
+  border-radius: 14px;
+}
+
+.composer .send {
+  height: 42px;
+  border-radius: 13px;
+}
+
+.composer-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+}
+
+.dialog-card, .emoji-picker, .reaction-full-picker-popover,
+.msg-dropdown, .chat-item-dropdown, .conv-dropdown {
+  background: var(--glass-bg);
+  backdrop-filter: saturate(180%) blur(22px);
+  -webkit-backdrop-filter: saturate(180%) blur(22px);
+}
+
+.dialog-card {
+  border-radius: 20px;
+}
+
+.dialog-icon, .admin-icon {
+  stroke: var(--accent);
+}
+
+.btn-secondary, .menu-btn, .info-panel-close-btn {
+  border-radius: 10px;
+}
+
+.chat-info-panel, .info-panel-view, .info-panel-head {
+  background: var(--rail-bg);
+}
+
+.chat-info-panel {
+  backdrop-filter: saturate(180%) blur(22px);
+  -webkit-backdrop-filter: saturate(180%) blur(22px);
+}
+
+@media (max-width: 768px) {
+  .thread-head, .composer {
+    background: var(--glass-bg);
   }
 }
