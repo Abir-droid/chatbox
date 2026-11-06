@@ -7023,11 +7023,11 @@ button:active {
 }
 
 .msg-row:not(.own) .bubble {
-  border-radius: 18px 18px 18px 5px !important;
+  border-radius: 18px !important;
 }
 
 .msg-row.own .bubble {
-  border-radius: 18px 18px 5px 18px !important;
+  border-radius: 18px !important;
 }
 
 .msg-row.own .bubble:not(.has-audio) {
@@ -7256,22 +7256,6 @@ button:active {
 
 .msg-row.cluster-continuation {
   margin-top: -0.65rem;
-}
-
-.msg-row.cluster-following:not(.own) .bubble {
-  border-bottom-left-radius: 18px !important;
-}
-
-.msg-row.cluster-continuation:not(.own) .bubble {
-  border-top-left-radius: 7px !important;
-}
-
-.msg-row.cluster-following.own .bubble {
-  border-bottom-right-radius: 18px !important;
-}
-
-.msg-row.cluster-continuation.own .bubble {
-  border-top-right-radius: 7px !important;
 }
 
 .composer-btn {
