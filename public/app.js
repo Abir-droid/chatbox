@@ -1032,8 +1032,10 @@
     });
 
     socket.on('message_purged', ({ id }) => {
-      const msgEl = document.querySelector(`.msg-row[data-msg-id="${id}"]`);
-      if (msgEl) msgEl.remove();
+      const msgEl = $(`msg-${id}`);
+      if (msgEl) removeMessageRowImmediately(msgEl);
+      const numericId = Number(id);
+      state.messagesCache.delete(Number.isFinite(numericId) ? numericId : id);
     });
 
     socket.on('friend_removed', ({ userId, friendId }) => {
@@ -1399,6 +1401,13 @@
 
   let searchTerm = '';
 
+  function setHeaderSubtitle(text, presence = null) {
+    if (!el.convSub) return;
+    el.convSub.textContent = text;
+    el.convSub.classList.toggle('is-online', presence === true);
+    el.convSub.classList.toggle('is-offline', presence === false);
+  }
+
   function refreshHeaderSubtitle() {
     if (!state.activeConversationId || !el.convSub) return;
     const conv = state.conversations.find((c) => c.id === state.activeConversationId);
@@ -1406,13 +1415,13 @@
     if (state.typers && state.typers.size > 0) {
       const names = [...state.typers.values()];
       const labelText = names.length === 1 ? `${names[0]} is typing…` : 'Multiple people are typing…';
-      el.convSub.textContent = labelText;
+      setHeaderSubtitle(labelText);
       return;
     }
     if (conv.type === 'group' || conv.isGroup) {
-      el.convSub.textContent = `${conv.memberCount || 0} members`;
+      setHeaderSubtitle(`${conv.memberCount || 0} members`);
     } else {
-      el.convSub.textContent = `${conv.phone || ''} • ${conv.isOnline ? 'Online' : 'Offline'}`;
+      setHeaderSubtitle(conv.isOnline ? 'Online' : 'Offline', Boolean(conv.isOnline));
     }
   }
 
@@ -1737,12 +1746,12 @@
         el.convAvatar.className = `avatar c-${conv.avatarColor || 0}`;
         el.convAvatar.textContent = '👥';
       }
-      el.convSub.textContent = `${conv.memberCount} members`;
+      setHeaderSubtitle(`${conv.memberCount} members`);
       el.manageGroupBtn.hidden = false;
       if (el.convInfoBtn) el.convInfoBtn.hidden = true;
     } else {
       renderAvatar(el.convAvatar, conv.name, conv.avatarColor, conv.avatarUrl, conv.isOnline);
-      el.convSub.textContent = `${conv.phone} • ${conv.isOnline ? 'Online' : 'Offline'}`;
+      setHeaderSubtitle(conv.isOnline ? 'Online' : 'Offline', Boolean(conv.isOnline));
       el.manageGroupBtn.hidden = true;
       if (el.convInfoBtn) el.convInfoBtn.hidden = false;
     }
@@ -1799,6 +1808,24 @@
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }
 
+  function messagesShareCluster(previous, current) {
+    if (!previous || !current || previous.senderName === 'System' || current.senderName === 'System') return false;
+    if (String(previous.senderId) !== String(current.senderId)) return false;
+
+    const previousTs = Number(previous.ts);
+    const currentTs = Number(current.ts);
+    return Number.isFinite(previousTs) && Number.isFinite(currentTs) &&
+      Math.abs(currentTs - previousTs) < 60000 &&
+      getDateKey(previousTs) === getDateKey(currentTs);
+  }
+
+  function getMessageForRow(row) {
+    if (!row || !row.id || !row.id.startsWith('msg-')) return null;
+    const rawId = row.id.slice(4);
+    const numericId = Number(rawId);
+    return state.messagesCache.get(Number.isFinite(numericId) ? numericId : rawId) || null;
+  }
+
   function formatChatDate(ts) {
     if (!ts) return '';
     const d = new Date(ts);
@@ -1822,6 +1849,36 @@
   function getLastMessageRow() {
     const rows = el.messages ? el.messages.querySelectorAll('.msg-row') : [];
     return rows.length > 0 ? rows[rows.length - 1] : null;
+  }
+
+  function getPreviousMessageRow(row) {
+    let previous = row ? row.previousElementSibling : null;
+    while (previous && !previous.classList.contains('msg-row')) {
+      previous = previous.previousElementSibling;
+    }
+    return previous;
+  }
+
+  function getNextMessageRow(row) {
+    let next = row ? row.nextElementSibling : null;
+    while (next && !next.classList.contains('msg-row')) {
+      next = next.nextElementSibling;
+    }
+    return next;
+  }
+
+  function updateMessageClustersAfterRemoval(previousRow, nextRow) {
+    const continues = messagesShareCluster(getMessageForRow(previousRow), getMessageForRow(nextRow));
+    if (previousRow) previousRow.classList.toggle('cluster-following', continues);
+    if (nextRow) nextRow.classList.toggle('cluster-continuation', continues);
+  }
+
+  function removeMessageRowImmediately(row) {
+    if (!row) return;
+    const previousRow = getPreviousMessageRow(row);
+    const nextRow = getNextMessageRow(row);
+    row.remove();
+    updateMessageClustersAfterRemoval(previousRow, nextRow);
   }
 
   function ensureDateSeparator(ts) {
@@ -1911,19 +1968,14 @@
           unreadDividerInserted = true;
         }
 
-        let isLastInCluster = true;
-        if (i < messages.length - 1) {
-          const nextMsg = messages[i + 1];
-          const sameSender = nextMsg.senderId === msg.senderId;
-          const nextNotSystem = nextMsg.senderName !== 'System';
-          const sameMinute = Math.abs(nextMsg.ts - msg.ts) < 60000;
-          const sameDay = getDateKey(nextMsg.ts) === getDateKey(msg.ts);
-          if (sameSender && nextNotSystem && sameMinute && sameDay) {
-            isLastInCluster = false;
-          }
-        }
+        const nextMsg = messages[i + 1];
+        const nextStartsUnread = firstUnreadMessageId && nextMsg && nextMsg.id === firstUnreadMessageId;
+        const clusterState = {
+          continuesPrevious: i > 0 && msg.id !== firstUnreadMessageId && messagesShareCluster(messages[i - 1], msg),
+          continuesNext: Boolean(nextMsg && !nextStartsUnread && messagesShareCluster(msg, nextMsg)),
+        };
 
-        appendMessage(msg, isLastInCluster);
+        appendMessage(msg, !clusterState.continuesNext, clusterState);
       }
 
       if (firstUnreadMessageId && unreadDividerInserted) {
@@ -1951,9 +2003,12 @@
     }
     const row = $(`msg-${id}`);
     if (row) {
+      const previousRow = getPreviousMessageRow(row);
+      const nextRow = getNextMessageRow(row);
       row.classList.add('pop-deleting');
       setTimeout(() => {
         row.remove();
+        updateMessageClustersAfterRemoval(previousRow, nextRow);
         cleanupDateSeparators();
         updateJumpButton();
         if (el.messages && el.messages.querySelectorAll('.msg-row').length === 0) {
@@ -2056,7 +2111,7 @@
       });
   }
 
-  function appendMessage(msg, isLastInCluster = true) {
+  function appendMessage(msg, isLastInCluster = true, clusterState = null) {
     el.emptyState.hidden = true;
     state.messagesCache.set(msg.id, msg);
 
@@ -2075,12 +2130,22 @@
       }
     }
 
+    const previousRow = existingOptRow ? getPreviousMessageRow(existingOptRow) : getLastMessageRow();
+    const previousMessage = getMessageForRow(previousRow);
+    const continuesPrevious = clusterState
+      ? Boolean(clusterState.continuesPrevious)
+      : messagesShareCluster(previousMessage, msg);
+    const continuesNext = clusterState ? Boolean(clusterState.continuesNext) : false;
+    if (previousRow) previousRow.classList.toggle('cluster-following', continuesPrevious);
+
     const isOwn = msg.senderId === state.user.id;
     const isSystem = msg.senderName === 'System';
     const msgDateKey = getDateKey(msg.ts || Date.now());
 
     const li = document.createElement('li');
     li.className = `msg-row ${isOwn ? 'own' : ''} ${isSystem ? 'system' : ''}`;
+    li.classList.toggle('cluster-continuation', !isSystem && continuesPrevious);
+    li.classList.toggle('cluster-following', !isSystem && continuesNext);
     li.id = `msg-${msg.id}`;
     if (msgDateKey) li.setAttribute('data-date-key', msgDateKey);
 
@@ -5364,7 +5429,7 @@
         el.manageGroupBtn.hidden = true;
         if (el.convInfoBtn) el.convInfoBtn.hidden = true;
         el.convTitle.textContent = 'Select a conversation';
-        el.convSub.textContent = 'or start a new chat';
+        setHeaderSubtitle('or start a new chat');
         renderAvatar(el.convAvatar, '#', 0, null);
         el.input.disabled = true;
         el.send.disabled = true;
