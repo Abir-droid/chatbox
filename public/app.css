@@ -7926,9 +7926,9 @@ button:active {
 
 /* ------------------------------------------------ Call Event Card Bubble */
 .bubble.has-call-card {
-  padding: 8px 10px 6px 10px !important;
-  min-width: 210px;
-  max-width: min(320px, 86vw);
+  padding: 8px 12px 6px 10px !important;
+  min-width: 170px;
+  max-width: min(300px, 86vw);
 }
 
 .msg-call-card {
@@ -7936,6 +7936,17 @@ button:active {
   align-items: center;
   gap: 10px;
   user-select: none;
+  cursor: pointer;
+  border-radius: 12px;
+  transition: opacity 0.15s ease;
+}
+
+.msg-call-card:hover .msg-call-icon-wrap {
+  transform: scale(1.08);
+}
+
+.msg-call-card:active {
+  opacity: 0.85;
 }
 
 .msg-call-icon-wrap {
@@ -7972,6 +7983,7 @@ button:active {
 .msg-call-info {
   flex: 1;
   min-width: 0;
+  padding-right: 4px;
 }
 
 .msg-call-title {
@@ -8019,43 +8031,6 @@ button:active {
 
 .msg-call-duration {
   font-weight: 500;
-}
-
-.msg-call-callback-btn {
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.05);
-  color: currentColor;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: all 0.18s ease;
-  margin-left: 2px;
-}
-
-.msg-call-callback-btn:hover {
-  background: rgba(59, 130, 246, 0.15);
-  color: #3b82f6;
-  transform: scale(1.08);
-}
-
-.msg-call-callback-btn:active {
-  transform: scale(0.95);
-}
-
-.msg-row.own .msg-call-callback-btn {
-  background: rgba(255, 255, 255, 0.2);
-  color: #ffffff;
-  border-color: rgba(255, 255, 255, 0.25);
-}
-
-.msg-row.own .msg-call-callback-btn:hover {
-  background: rgba(255, 255, 255, 0.32);
-  color: #ffffff;
 }
 
 .bubble.has-call-card .bubble-meta {

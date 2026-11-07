@@ -2315,6 +2315,7 @@
 
     const card = document.createElement('div');
     card.className = `msg-call-card ${isAlert ? 'is-missed' : 'is-success'}`;
+    card.title = `Call back (${isVideo ? 'Video' : 'Voice'})`;
 
     card.innerHTML = `
       <div class="msg-call-icon-wrap ${isAlert ? 'icon-alert' : 'icon-normal'}">
@@ -2327,21 +2328,16 @@
           <span class="msg-call-duration">${escapeHtml(subtitle)}</span>
         </div>
       </div>
-      <button type="button" class="msg-call-callback-btn" title="Call back (${isVideo ? 'Video' : 'Voice'})" aria-label="Call back">
-        ${mainIconSvg}
-      </button>
     `;
 
-    const callbackBtn = card.querySelector('.msg-call-callback-btn');
-    if (callbackBtn) {
-      callbackBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (msg.conversationId && state.activeConversationId !== msg.conversationId) {
-          setActiveConversation(msg.conversationId);
-        }
-        initiateCall(callType || 'audio');
-      });
-    }
+    card.addEventListener('click', (e) => {
+      if (state.selectionMode) return;
+      e.stopPropagation();
+      if (msg.conversationId && state.activeConversationId !== msg.conversationId) {
+        setActiveConversation(msg.conversationId);
+      }
+      initiateCall(callType || 'audio');
+    });
 
     bubble.appendChild(card);
     if (bubbleMeta) bubble.appendChild(bubbleMeta);
