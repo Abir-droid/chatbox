@@ -1365,9 +1365,20 @@
         }
       }
 
-      const displayText = msg.mediaType === 'audio'
-        ? '🎤 Voice note'
-        : (msg.mediaType === 'image' ? '📷 Photo' : (msg.mediaType === 'video' ? '🎥 Video' : (msg.mediaType === 'file' ? '📎 ' + (msg.mediaName || 'Document') : msg.text)));
+      let displayText = msg.text;
+      if (msg.mediaType === 'call' || msg.media_type === 'call') {
+        const isVideo = msg.text && msg.text.toLowerCase().includes('video');
+        const icon = isVideo ? '📹 ' : '📞 ';
+        displayText = msg.text.startsWith('📞') || msg.text.startsWith('📹') ? msg.text : `${icon}${msg.text}`;
+      } else if (msg.mediaType === 'audio') {
+        displayText = '🎤 Voice note';
+      } else if (msg.mediaType === 'image') {
+        displayText = '📷 Photo';
+      } else if (msg.mediaType === 'video') {
+        displayText = '🎥 Video';
+      } else if (msg.mediaType === 'file') {
+        displayText = '📎 ' + (msg.mediaName || 'Document');
+      }
 
       // Update sidebar preview
       let conv = state.conversations.find((c) => c.id === msg.conversationId);
@@ -2254,6 +2265,88 @@
       });
   }
 
+  function renderCallBubble(bubble, msg, isOwn, bubbleMeta) {
+    bubble.classList.add('has-call-card');
+    const callData = (Array.isArray(msg.mediaList) && msg.mediaList[0]) || {};
+    const callType = callData.callType || (msg.text && msg.text.toLowerCase().includes('video') ? 'video' : 'audio');
+    const isVideo = callType === 'video';
+    const rawStatus = (callData.status || (msg.text && msg.text.toLowerCase().includes('missed') ? 'missed' : (msg.text && msg.text.toLowerCase().includes('declined') ? 'declined' : 'ended'))).toLowerCase();
+
+    const isEnded = rawStatus === 'ended';
+    const isMissed = rawStatus === 'missed';
+    const isDeclined = rawStatus === 'declined';
+
+    let title = '';
+    let subtitle = '';
+    let isAlert = false;
+
+    if (isEnded) {
+      title = isVideo ? 'Video call' : 'Voice call';
+      subtitle = callData.durationFormatted || (callData.duration ? formatCallDuration(callData.duration) : (msg.text && msg.text.includes('•') ? msg.text.split('•')[1].trim() : 'Call ended'));
+    } else if (isMissed) {
+      if (isOwn) {
+        title = isVideo ? 'Video call' : 'Voice call';
+        subtitle = 'No answer';
+      } else {
+        title = isVideo ? 'Missed video call' : 'Missed voice call';
+        subtitle = 'Missed';
+        isAlert = true;
+      }
+    } else if (isDeclined) {
+      if (isOwn) {
+        title = isVideo ? 'Video call' : 'Voice call';
+        subtitle = 'Declined';
+      } else {
+        title = isVideo ? 'Declined video call' : 'Declined voice call';
+        subtitle = 'Declined';
+      }
+    } else {
+      title = isVideo ? 'Video call' : 'Voice call';
+      subtitle = msg.text || '';
+    }
+
+    const phoneIconSvg = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>';
+    const videoIconSvg = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>';
+    const mainIconSvg = isVideo ? videoIconSvg : phoneIconSvg;
+
+    const outgoingArrowSvg = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg>';
+    const incomingArrowSvg = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="17" y1="7" x2="7" y2="17"/><polyline points="17 17 7 17 7 7"/></svg>';
+    const dirArrowSvg = isOwn ? outgoingArrowSvg : incomingArrowSvg;
+
+    const card = document.createElement('div');
+    card.className = `msg-call-card ${isAlert ? 'is-missed' : 'is-success'}`;
+
+    card.innerHTML = `
+      <div class="msg-call-icon-wrap ${isAlert ? 'icon-alert' : 'icon-normal'}">
+        ${mainIconSvg}
+      </div>
+      <div class="msg-call-info">
+        <div class="msg-call-title">${escapeHtml(title)}</div>
+        <div class="msg-call-sub">
+          <span class="msg-call-dir ${isAlert ? 'dir-alert' : ''}">${dirArrowSvg}</span>
+          <span class="msg-call-duration">${escapeHtml(subtitle)}</span>
+        </div>
+      </div>
+      <button type="button" class="msg-call-callback-btn" title="Call back (${isVideo ? 'Video' : 'Voice'})" aria-label="Call back">
+        ${mainIconSvg}
+      </button>
+    `;
+
+    const callbackBtn = card.querySelector('.msg-call-callback-btn');
+    if (callbackBtn) {
+      callbackBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (msg.conversationId && state.activeConversationId !== msg.conversationId) {
+          setActiveConversation(msg.conversationId);
+        }
+        initiateCall(callType || 'audio');
+      });
+    }
+
+    bubble.appendChild(card);
+    if (bubbleMeta) bubble.appendChild(bubbleMeta);
+  }
+
   function appendMessage(msg, isLastInCluster = true, clusterState = null) {
     el.emptyState.hidden = true;
     state.messagesCache.set(msg.id, msg);
@@ -2401,8 +2494,11 @@
       bubble.appendChild(quoteDiv);
     }
 
+    const isCallMsg = (msg.mediaType === 'call' || msg.media_type === 'call');
+
     // Media Handling: Multiple Media Collage or Single Media
-    const rawMediaList = Array.isArray(msg.mediaList) && msg.mediaList.length > 0
+    if (!isCallMsg) {
+      const rawMediaList = Array.isArray(msg.mediaList) && msg.mediaList.length > 0
       ? msg.mediaList
       : (msg.mediaUrl || msg.media_url ? [{
           url: msg.mediaUrl || msg.media_url,
@@ -2645,6 +2741,7 @@
 
       bubble.appendChild(fileDiv);
     });
+    } // end of if (!isCallMsg)
 
     // Integrated WhatsApp-style metadata (time & seen/unseen ticks inside bubble)
     const bubbleMeta = document.createElement('div');
@@ -2670,7 +2767,9 @@
       bubbleMeta.appendChild(checkWrap);
     }
 
-    if (bubble.classList.contains('has-media') && msg.text) {
+    if (isCallMsg) {
+      renderCallBubble(bubble, msg, isOwn, bubbleMeta);
+    } else if (bubble.classList.contains('has-media') && msg.text) {
       const captionWrap = document.createElement('div');
       captionWrap.className = 'bubble-caption-wrap';
 
@@ -2980,7 +3079,7 @@
     dropdown.appendChild(forwardItem);
 
     // Option: Edit Message (for own text messages)
-    if (isOwn && msg.text && !isUploading) {
+    if (isOwn && msg.text && !isUploading && msg.mediaType !== 'call' && msg.media_type !== 'call') {
       const editItem = document.createElement('button');
       editItem.type = 'button';
       editItem.className = 'msg-dropdown-item';
@@ -6273,9 +6372,16 @@
   let incomingCallData = null;
 
   function formatCallDuration(sec) {
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
-    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    if (!sec || isNaN(sec) || sec <= 0) return '00:00';
+    const s = Math.round(sec);
+    const m = Math.floor(s / 60);
+    const remS = s % 60;
+    if (m >= 60) {
+      const h = Math.floor(m / 60);
+      const remM = m % 60;
+      return `${h}:${String(remM).padStart(2, '0')}:${String(remS).padStart(2, '0')}`;
+    }
+    return `${String(m).padStart(2, '0')}:${String(remS).padStart(2, '0')}`;
   }
 
   function startCallTimer() {

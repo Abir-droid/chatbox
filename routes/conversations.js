@@ -114,7 +114,11 @@ module.exports = function registerConversationRoutes(context) {
           if (lastMsgRes.rows.length) {
             const row = lastMsgRes.rows[0];
             lastMsgText = row.body || '';
-            if (!lastMsgText) {
+            if (row.media_type === 'call') {
+              const isVideo = row.body && row.body.toLowerCase().includes('video');
+              const icon = isVideo ? '📹 ' : '📞 ';
+              lastMsgText = row.body.startsWith('📞') || row.body.startsWith('📹') ? row.body : `${icon}${row.body}`;
+            } else if (!lastMsgText) {
               if (row.media_type === 'audio') lastMsgText = '🎤 Voice note';
               else if (row.media_type === 'image') lastMsgText = '📷 Photo';
               else if (row.media_type === 'video') lastMsgText = '🎥 Video';

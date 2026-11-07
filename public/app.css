@@ -7923,3 +7923,142 @@ button:active {
     width: auto;
   }
 }
+
+/* ------------------------------------------------ Call Event Card Bubble */
+.bubble.has-call-card {
+  padding: 8px 10px 6px 10px !important;
+  min-width: 210px;
+  max-width: min(320px, 86vw);
+}
+
+.msg-call-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  user-select: none;
+}
+
+.msg-call-icon-wrap {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: transform 0.15s ease, background-color 0.15s ease;
+}
+
+.msg-call-icon-wrap.icon-normal {
+  background: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+}
+
+.msg-row.own .msg-call-icon-wrap.icon-normal {
+  background: rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+}
+
+.msg-call-icon-wrap.icon-alert {
+  background: rgba(239, 68, 68, 0.18);
+  color: #ef4444;
+}
+
+.msg-row.own .msg-call-icon-wrap.icon-alert {
+  background: rgba(239, 68, 68, 0.28);
+  color: #fca5a5;
+}
+
+.msg-call-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.msg-call-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.msg-call-card.is-missed:not(.msg-row.own *) .msg-call-title {
+  color: #ef4444;
+}
+
+.msg-row.own .msg-call-card.is-missed .msg-call-title {
+  color: #ffffff;
+}
+
+.msg-call-sub {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.74rem;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.msg-row.own .msg-call-sub {
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.msg-call-dir {
+  display: inline-flex;
+  align-items: center;
+}
+
+.msg-call-dir.dir-alert {
+  color: #ef4444;
+}
+
+.msg-row.own .msg-call-dir.dir-alert {
+  color: #fca5a5;
+}
+
+.msg-call-duration {
+  font-weight: 500;
+}
+
+.msg-call-callback-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.05);
+  color: currentColor;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.18s ease;
+  margin-left: 2px;
+}
+
+.msg-call-callback-btn:hover {
+  background: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+  transform: scale(1.08);
+}
+
+.msg-call-callback-btn:active {
+  transform: scale(0.95);
+}
+
+.msg-row.own .msg-call-callback-btn {
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.msg-row.own .msg-call-callback-btn:hover {
+  background: rgba(255, 255, 255, 0.32);
+  color: #ffffff;
+}
+
+.bubble.has-call-card .bubble-meta {
+  margin-top: 3px;
+  margin-bottom: 0;
+}

@@ -733,6 +733,124 @@ const onlineUsers = new Set(); // Set of userIds currently online
 const activeCalls = new Map(); // callId -> callRecord
 const userActiveCalls = new Map(); // userId -> callId
 
+function formatCallDuration(durationSec) {
+  const s = Math.max(1, Math.round(durationSec));
+  const mins = Math.floor(s / 60);
+  const secs = s % 60;
+  if (mins >= 60) {
+    const hours = Math.floor(mins / 60);
+    const remMins = mins % 60;
+    return `${hours}:${String(remMins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  }
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
+async function recordCallMessage(call, reason) {
+  try {
+    if (!call || !call.conversationId || !call.callerId) return;
+
+    const isAnswered = call.status === 'active' && call.acceptedAt;
+    let duration = 0;
+    let durationFormatted = '00:00';
+    let callStatus = 'missed';
+
+    if (isAnswered) {
+      callStatus = 'ended';
+      duration = Math.max(1, Math.round((Date.now() - call.acceptedAt) / 1000));
+      durationFormatted = formatCallDuration(duration);
+    } else if (reason === 'declined') {
+      callStatus = 'declined';
+    } else {
+      callStatus = 'missed';
+    }
+
+    const isVideo = call.callType === 'video';
+    let body = '';
+    if (callStatus === 'ended') {
+      body = `${isVideo ? 'Video call' : 'Voice call'} • ${durationFormatted}`;
+    } else if (callStatus === 'declined') {
+      body = isVideo ? 'Declined video call' : 'Declined voice call';
+    } else {
+      body = isVideo ? 'Missed video call' : 'Missed voice call';
+    }
+
+    const mediaList = [
+      {
+        callId: call.id,
+        callType: call.callType || 'audio',
+        status: callStatus,
+        duration,
+        durationFormatted,
+        callerId: call.callerId,
+        calleeId: call.calleeId,
+        reason,
+      },
+    ];
+
+    const convId = call.conversationId;
+    const caller = await getUserById(call.callerId);
+    const callerName = (caller && caller.name) || 'User';
+
+    // Fetch conversation members
+    const members = await pool.query(
+      'SELECT user_id FROM chat_conversation_members WHERE conversation_id = $1',
+      [convId]
+    );
+
+    const anyOtherOnline = members.rows.some(
+      (m) => Number(m.user_id) !== call.callerId && onlineUsers.has(Number(m.user_id))
+    );
+    const initialStatus = anyOtherOnline ? 'delivered' : 'sent';
+
+    const mediaListJson = JSON.stringify(mediaList);
+    const msgRes = await pool.query(
+      `INSERT INTO chat_messages (conversation_id, sender_id, sender_name, body, media_type, media_list, status)
+       VALUES ($1, $2, $3, $4, 'call', $5, $6)
+       RETURNING id, created_at`,
+      [convId, call.callerId, callerName, body, mediaListJson, initialStatus]
+    );
+
+    await pool.query('UPDATE chat_conversation_members SET is_hidden = FALSE WHERE conversation_id = $1', [convId]);
+    await pool.query('UPDATE chat_conversations SET updated_at = now() WHERE id = $1', [convId]);
+
+    const msg = {
+      id: Number(msgRes.rows[0].id),
+      conversationId: convId,
+      senderId: call.callerId,
+      senderName: callerName,
+      senderAvatarUrl: caller ? caller.avatar_url : null,
+      senderAvatarColor: caller ? caller.avatar_color : 0,
+      text: body,
+      mediaType: 'call',
+      mediaList,
+      status: initialStatus,
+      reactions: [],
+      ts: new Date(msgRes.rows[0].created_at).getTime(),
+    };
+
+    const targetRooms = [`c:${convId}`];
+    for (const m of members.rows) {
+      targetRooms.push(`u:${m.user_id}`);
+    }
+    io.to(targetRooms).emit('message', msg);
+
+    const icon = isVideo ? '📹' : '📞';
+    const snippetText = `${icon} ${body}`;
+    for (const m of members.rows) {
+      io.to(`u:${m.user_id}`).emit('conversation_updated', {
+        conversationId: convId,
+        lastMessage: {
+          text: snippetText,
+          senderName: callerName,
+          ts: msg.ts,
+        },
+      });
+    }
+  } catch (err) {
+    console.error('Failed to record call message:', err);
+  }
+}
+
 function cleanupCall(callId, reason = 'ended') {
   const call = activeCalls.get(callId);
   if (!call) return null;
@@ -742,6 +860,12 @@ function cleanupCall(callId, reason = 'ended') {
   activeCalls.delete(callId);
   userActiveCalls.delete(call.callerId);
   userActiveCalls.delete(call.calleeId);
+
+  // Record call completion or missed call in chat
+  recordCallMessage(call, reason).catch((err) => {
+    console.error('recordCallMessage failed:', err);
+  });
+
   return call;
 }
 
