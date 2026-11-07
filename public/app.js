@@ -6323,10 +6323,6 @@
       const isVideoActive = !callState.isCameraOff;
       el.callToggleCamBtn.classList.toggle('active-on', isVideoActive);
       el.callToggleCamBtn.classList.remove('active-off');
-      const camOn = el.callToggleCamBtn.querySelector('.ctrl-icon-cam-on');
-      const camOff = el.callToggleCamBtn.querySelector('.ctrl-icon-cam-off');
-      if (camOn) camOn.hidden = !isVideoActive;
-      if (camOff) camOff.hidden = isVideoActive;
       el.callToggleCamBtn.title = isVideoActive ? 'Turn Camera Off' : 'Turn Camera On';
       el.callToggleCamBtn.setAttribute('aria-label', el.callToggleCamBtn.title);
     }
