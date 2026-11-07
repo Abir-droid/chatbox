@@ -2495,24 +2495,23 @@
     }
 
     const isCallMsg = (msg.mediaType === 'call' || msg.media_type === 'call');
+    const isUploading = msg.status === 'uploading';
 
     // Media Handling: Multiple Media Collage or Single Media
-    if (!isCallMsg) {
-      const rawMediaList = Array.isArray(msg.mediaList) && msg.mediaList.length > 0
+    const rawMediaList = !isCallMsg && Array.isArray(msg.mediaList) && msg.mediaList.length > 0
       ? msg.mediaList
-      : (msg.mediaUrl || msg.media_url ? [{
+      : (!isCallMsg && (msg.mediaUrl || msg.media_url) ? [{
           url: msg.mediaUrl || msg.media_url,
           mediaType: msg.mediaType || msg.media_type,
           mediaName: msg.mediaName || msg.media_name,
         }] : []);
 
-    const isUploading = msg.status === 'uploading';
+    if (!isCallMsg) {
+      const visualItems = [];
+      const fileItems = [];
+      const audioItems = [];
 
-    const visualItems = [];
-    const fileItems = [];
-    const audioItems = [];
-
-    rawMediaList.forEach((item) => {
+      rawMediaList.forEach((item) => {
       if (!item || !item.url) return;
       const rawType = (item.mediaType || '').toLowerCase();
       const mediaUrl = item.url || '';
