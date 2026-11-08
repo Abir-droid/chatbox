@@ -856,6 +856,11 @@ function cleanupCall(callId, reason = 'ended') {
   if (!call) return null;
   if (call.timeoutTimer) {
     clearTimeout(call.timeoutTimer);
+    call.timeoutTimer = null;
+  }
+  if (call.reconnectTimer) {
+    clearTimeout(call.reconnectTimer);
+    call.reconnectTimer = null;
   }
   activeCalls.delete(callId);
   userActiveCalls.delete(call.callerId);
@@ -1026,6 +1031,34 @@ io.on('connection', async (socket) => {
     }
   } catch (err) {
     console.error('Socket join rooms error:', err);
+  }
+
+  // Notify if user has an active call session awaiting reconnection
+  if (userActiveCalls.has(user.id)) {
+    const existingCallId = userActiveCalls.get(user.id);
+    const existingCall = activeCalls.get(existingCallId);
+    if (existingCall && existingCall.status === 'active') {
+      const peerId = (existingCall.callerId === user.id) ? existingCall.calleeId : existingCall.callerId;
+      getUserById(peerId).then((peer) => {
+        socket.emit('call_active_session', {
+          callId: existingCall.id,
+          callerId: existingCall.callerId,
+          calleeId: existingCall.calleeId,
+          conversationId: existingCall.conversationId,
+          callType: existingCall.callType,
+          acceptedAt: existingCall.acceptedAt,
+          createdAt: existingCall.createdAt,
+          isInitiator: (existingCall.callerId === user.id),
+          peer: peer ? {
+            id: peer.id,
+            name: peer.name,
+            phone: peer.phone,
+            avatarUrl: peer.avatar_url,
+            avatarColor: peer.avatar_color,
+          } : null,
+        });
+      }).catch(() => {});
+    }
   }
 
   // Join a specific conversation
@@ -1407,7 +1440,12 @@ io.on('connection', async (socket) => {
     }
 
     if (userActiveCalls.has(user.id)) {
-      return reply({ ok: false, error: 'You are already in a call' });
+      const existingCallId = userActiveCalls.get(user.id);
+      const existingCall = activeCalls.get(existingCallId);
+      if (existingCall) {
+        return reply({ ok: false, error: 'You are already in a call' });
+      }
+      userActiveCalls.delete(user.id);
     }
 
     if (!onlineUsers.has(targetUserId)) {
@@ -1415,7 +1453,12 @@ io.on('connection', async (socket) => {
     }
 
     if (userActiveCalls.has(targetUserId)) {
-      return reply({ ok: false, error: 'User is busy on another call', isBusy: true });
+      const targetCallId = userActiveCalls.get(targetUserId);
+      const targetCall = activeCalls.get(targetCallId);
+      if (targetCall) {
+        return reply({ ok: false, error: 'User is busy on another call', isBusy: true });
+      }
+      userActiveCalls.delete(targetUserId);
     }
 
     try {
@@ -1442,6 +1485,8 @@ io.on('connection', async (socket) => {
       status: 'ringing',
       createdAt: Date.now(),
       timeoutTimer: null,
+      reconnectTimer: null,
+      reconnectingUser: null,
     };
 
     // Auto-timeout after 45 seconds if unanswered
@@ -1507,6 +1552,56 @@ io.on('connection', async (socket) => {
     reply({ ok: true });
   });
 
+  // Rejoin call after refresh or reconnection
+  socket.on('call_rejoin', async (payload, ack) => {
+    const reply = typeof ack === 'function' ? ack : () => {};
+    const callId = payload && payload.callId;
+    const call = activeCalls.get(callId);
+
+    if (!call || call.status !== 'active') {
+      return reply({ ok: false, error: 'Call no longer active' });
+    }
+    if (call.callerId !== user.id && call.calleeId !== user.id) {
+      return reply({ ok: false, error: 'Unauthorized' });
+    }
+
+    if (call.reconnectTimer) {
+      clearTimeout(call.reconnectTimer);
+      call.reconnectTimer = null;
+    }
+    call.reconnectingUser = null;
+    userActiveCalls.set(user.id, callId);
+
+    const peerId = (call.callerId === user.id) ? call.calleeId : call.callerId;
+    const peer = await getUserById(peerId);
+
+    io.to(`u:${peerId}`).emit('call_peer_reconnected', {
+      callId,
+      reconnectedUserId: user.id,
+    });
+
+    reply({
+      ok: true,
+      call: {
+        id: call.id,
+        callerId: call.callerId,
+        calleeId: call.calleeId,
+        conversationId: call.conversationId,
+        callType: call.callType,
+        acceptedAt: call.acceptedAt,
+        createdAt: call.createdAt,
+        isInitiator: (call.callerId === user.id),
+        peer: peer ? {
+          id: peer.id,
+          name: peer.name,
+          phone: peer.phone,
+          avatarUrl: peer.avatar_url,
+          avatarColor: peer.avatar_color,
+        } : null,
+      },
+    });
+  });
+
   // Reject / Decline call
   socket.on('call_reject', (payload, ack) => {
     const reply = typeof ack === 'function' ? ack : () => {};
@@ -1559,16 +1654,44 @@ io.on('connection', async (socket) => {
 
   // Disconnect
   socket.on('disconnect', () => {
-    onlineUsers.delete(user.id);
-    io.emit('user_status', { userId: user.id, isOnline: false });
+    const userSockets = io.sockets.adapter.rooms.get(`u:${user.id}`);
+    const isStillConnected = Boolean(userSockets && userSockets.size > 0);
+
+    if (!isStillConnected) {
+      onlineUsers.delete(user.id);
+      io.emit('user_status', { userId: user.id, isOnline: false });
+    }
 
     // Clean up call if disconnecting while active/ringing
     if (userActiveCalls.has(user.id)) {
       const callId = userActiveCalls.get(user.id);
-      const call = cleanupCall(callId, 'disconnected');
+      const call = activeCalls.get(callId);
       if (call) {
-        const peerId = (call.callerId === user.id) ? call.calleeId : call.callerId;
-        io.to(`u:${peerId}`).emit('call_ended', { callId, reason: 'disconnected' });
+        if (!isStillConnected) {
+          if (call.status === 'ringing') {
+            cleanupCall(callId, 'disconnected');
+            const peerId = (call.callerId === user.id) ? call.calleeId : call.callerId;
+            io.to(`u:${peerId}`).emit('call_ended', { callId, reason: 'disconnected' });
+          } else if (call.status === 'active') {
+            // Allow a grace period for active calls (e.g. page refresh or brief disconnect)
+            call.reconnectingUser = user.id;
+            const peerId = (call.callerId === user.id) ? call.calleeId : call.callerId;
+            io.to(`u:${peerId}`).emit('call_peer_reconnecting', {
+              callId,
+              timeout: 25,
+              disconnectedUserId: user.id,
+            });
+
+            if (call.reconnectTimer) clearTimeout(call.reconnectTimer);
+            call.reconnectTimer = setTimeout(() => {
+              const currentCall = activeCalls.get(callId);
+              if (currentCall && currentCall.reconnectingUser === user.id) {
+                cleanupCall(callId, 'disconnected');
+                io.to(`u:${peerId}`).emit('call_ended', { callId, reason: 'disconnected' });
+              }
+            }, 25000);
+          }
+        }
       }
     }
   });

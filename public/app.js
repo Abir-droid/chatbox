@@ -1078,6 +1078,7 @@
 
   function logout() {
     cleanupCallState();
+    saveActiveConversation(null);
     state.token = '';
     state.user = null;
     localStorage.removeItem('chatbox_token');
@@ -1117,15 +1118,17 @@
     el.navAdmin.hidden = !state.user.is_admin;
 
     initSocket();
+
+    const savedConvId = getSavedConversationId();
+    if (window.innerWidth <= 768 && !savedConvId && !state.activeConversationId) {
+      openRail();
+    }
+
     loadConversations();
     loadFriends();
     loadFriendRequests();
     hideLoader();
     checkNotificationPrompt();
-
-    if (window.innerWidth <= 768 && !state.activeConversationId) {
-      openRail();
-    }
   }
 
   /* ------------------------------------------------------------- socket */
@@ -1143,6 +1146,7 @@
       if (state.activeConversationId) {
         socket.emit('join_conversation', { conversationId: state.activeConversationId });
       }
+      checkAndRejoinActiveCall();
     });
 
     socket.on('disconnect', () => {
@@ -1547,6 +1551,9 @@
     socket.on('call_rejected', (data) => handleCallRejected(data));
     socket.on('call_signal', (data) => handleCallSignal(data));
     socket.on('call_ended', (data) => handleCallEnded(data));
+    socket.on('call_active_session', (data) => checkAndRejoinActiveCall(data));
+    socket.on('call_peer_reconnecting', (data) => handleCallPeerReconnecting(data));
+    socket.on('call_peer_reconnected', (data) => handleCallPeerReconnected(data));
   }
 
   let searchTerm = '';
@@ -1639,13 +1646,61 @@
     } catch (e) {}
   }
 
+  /* ------------------------------------------------------- active conversation state */
+  function getSavedConversationId() {
+    const hash = window.location.hash || '';
+    const match = hash.match(/#(?:c=|conv=)?(\d+)/);
+    if (match) {
+      const id = Number(match[1]);
+      if (Number.isFinite(id) && id > 0) return id;
+    }
+    const saved = localStorage.getItem('chatbox_active_conv');
+    if (saved) {
+      const id = Number(saved);
+      if (Number.isFinite(id) && id > 0) return id;
+    }
+    return null;
+  }
+
+  function saveActiveConversation(convId) {
+    if (convId) {
+      try {
+        localStorage.setItem('chatbox_active_conv', String(convId));
+      } catch (e) {}
+      const targetHash = `#c=${convId}`;
+      if (window.location.hash !== targetHash) {
+        history.replaceState(null, '', targetHash);
+      }
+    } else {
+      try {
+        localStorage.removeItem('chatbox_active_conv');
+      } catch (e) {}
+      if (window.location.hash && /#(?:c=|conv=)?\d+/.test(window.location.hash)) {
+        history.replaceState(null, '', window.location.pathname + window.location.search);
+      }
+    }
+  }
+
   /* ------------------------------------------------------- conversations & chats */
-  async function loadConversations() {
+  async function loadConversations(targetConvId = null) {
     try {
       const data = await api('/api/conversations');
       state.conversations = data.conversations || [];
       updateUnreadBadges();
       renderConversations();
+
+      const candidateId = targetConvId || (!state.activeConversationId ? getSavedConversationId() : null);
+      if (candidateId) {
+        const found = state.conversations.find((c) => c.id === candidateId);
+        if (found) {
+          await switchConversation(candidateId);
+          if (window.innerWidth <= 768) {
+            closeRail();
+          }
+        } else if (!state.activeConversationId) {
+          saveActiveConversation(null);
+        }
+      }
     } catch (err) {
       console.error('Load conversations error:', err);
     }
@@ -1868,6 +1923,7 @@
 
   async function switchConversation(convId) {
     state.activeConversationId = convId;
+    saveActiveConversation(convId);
     if (el.jump) el.jump.hidden = true;
     exitSelectionMode();
     closeRail();
@@ -5662,6 +5718,7 @@
         closeChatInfoPanel();
 
         state.activeConversationId = null;
+        saveActiveConversation(null);
         if (el.convDropdown) el.convDropdown.hidden = true;
         el.manageGroupBtn.hidden = true;
         if (el.startVoiceCallBtn) el.startVoiceCallBtn.hidden = true;
@@ -6206,6 +6263,32 @@
     adjustInputHeight();
   });
 
+  window.addEventListener('hashchange', () => {
+    const hashId = getSavedConversationId();
+    if (hashId && hashId !== state.activeConversationId) {
+      const conv = state.conversations.find((c) => c.id === hashId);
+      if (conv) {
+        switchConversation(hashId);
+      }
+    } else if (!window.location.hash && state.activeConversationId) {
+      state.activeConversationId = null;
+      saveActiveConversation(null);
+      renderConversations();
+      el.emptyState.hidden = false;
+      el.emptyTitle.textContent = 'Welcome to chatbox';
+      el.emptyText.textContent = 'Select a chat from the sidebar or click + to start messaging.';
+      el.convTitle.textContent = 'Select a conversation';
+      setHeaderSubtitle('or start a new chat');
+      renderAvatar(el.convAvatar, '#', 0, null);
+      el.input.disabled = true;
+      el.send.disabled = true;
+      el.messages.replaceChildren();
+      if (window.innerWidth <= 768) {
+        openRail();
+      }
+    }
+  });
+
   // Window focus & tab visibility: clear unread for active chat
   function handleWindowFocus() {
     if (state.activeConversationId) {
@@ -6379,11 +6462,45 @@
     return `${String(m).padStart(2, '0')}:${String(remS).padStart(2, '0')}`;
   }
 
-  function startCallTimer() {
+  function persistActiveCallSession() {
+    if (!callState.active || !callState.callId) {
+      try { sessionStorage.removeItem('chatbox_active_call'); } catch {}
+      return;
+    }
+    const data = {
+      callId: callState.callId,
+      peerId: callState.peerId,
+      peerName: callState.peerName,
+      peerAvatarUrl: callState.peerAvatarUrl,
+      peerAvatarColor: callState.peerAvatarColor,
+      callType: callState.callType,
+      isInitiator: callState.isInitiator,
+      startTime: callState.startTime || Date.now(),
+      conversationId: state.activeConversationId,
+      isMuted: Boolean(callState.isMuted),
+      isCameraOff: Boolean(callState.isCameraOff),
+      isMinimized: Boolean(callState.isMinimized),
+    };
+    try {
+      sessionStorage.setItem('chatbox_active_call', JSON.stringify(data));
+    } catch (e) {}
+  }
+
+  // Warn user before leaving or refreshing while on an active or incoming call
+  window.addEventListener('beforeunload', (e) => {
+    if (callState.active || incomingCallData) {
+      e.preventDefault();
+      e.returnValue = '';
+      return '';
+    }
+  });
+
+  function startCallTimer(initialStartTime = null) {
     stopCallTimer();
-    callState.startTime = Date.now();
+    callState.startTime = initialStartTime || callState.startTime || Date.now();
     updateCallTimerDisplay();
     callState.timerInterval = setInterval(updateCallTimerDisplay, 1000);
+    persistActiveCallSession();
   }
 
   function stopCallTimer() {
@@ -6555,10 +6672,14 @@
       el.activeCallOverlay.style.bottom = '';
       el.activeCallOverlay.hidden = false;
     }
+    persistActiveCallSession();
   }
 
   function setupPeerConnection() {
     if (callState.pc) {
+      callState.pc.onconnectionstatechange = null;
+      callState.pc.onicecandidate = null;
+      callState.pc.ontrack = null;
       try { callState.pc.close(); } catch {}
       callState.pc = null;
     }
@@ -6618,13 +6739,15 @@
       const st = pc.connectionState;
       if (st === 'connected') {
         stopRingtones();
-        startCallTimer();
+        startCallTimer(callState.startTime);
         optimizeVideoBitrate(pc);
       } else if (st === 'disconnected') {
         setCallStatusText('Reconnecting…');
       } else if (st === 'failed') {
-        toast('Call connection failed');
-        endCall('failed');
+        if (!isRejoiningCall) {
+          toast('Call connection failed');
+          endCall('failed');
+        }
       } else if (st === 'closed') {
         cleanupCallState();
       }
@@ -6793,6 +6916,8 @@
       if (!res || !res.ok) {
         toast(res?.error || 'Could not connect call');
         cleanupCallState();
+      } else {
+        persistActiveCallSession();
       }
     });
   }
@@ -6815,6 +6940,7 @@
     if (!callState.active || callState.callId !== data.callId) return;
     stopRingtones();
     setCallStatusText('Connecting…');
+    persistActiveCallSession();
 
     if (callState.isInitiator && callState.pc) {
       try {
@@ -6847,6 +6973,9 @@
 
     if (signal.sdp) {
       try {
+        if (signal.isReconnect && callState.pc && callState.pc.signalingState !== 'stable') {
+          setupPeerConnection();
+        }
         const desc = new RTCSessionDescription(signal.sdp);
         await callState.pc.setRemoteDescription(desc);
 
@@ -6917,6 +7046,122 @@
       toast(data.reason === 'disconnected' ? 'Call disconnected' : 'Call ended');
       cleanupCallState();
     }
+  }
+
+  function handleCallPeerReconnecting(data) {
+    if (!callState.active || callState.callId !== data.callId) return;
+    stopRingtones();
+    setCallStatusText('Peer reconnecting…');
+    if (el.activeCallPillTimer) {
+      el.activeCallPillTimer.textContent = '• Reconnecting…';
+      el.activeCallPillTimer.hidden = false;
+    }
+  }
+
+  function handleCallPeerReconnected(data) {
+    if (!callState.active || callState.callId !== data.callId) return;
+    setCallStatusText('Re-establishing call…');
+    setupPeerConnection();
+  }
+
+  let isRejoiningCall = false;
+  async function checkAndRejoinActiveCall(serverCallData = null) {
+    if (callState.active || isRejoiningCall) return;
+    let savedCall = null;
+    try {
+      const raw = sessionStorage.getItem('chatbox_active_call');
+      if (raw) savedCall = JSON.parse(raw);
+    } catch (e) {}
+
+    if (!savedCall && !serverCallData) return;
+
+    const callId = (savedCall && savedCall.callId) || (serverCallData && serverCallData.callId);
+    if (!callId || !socket) return;
+
+    isRejoiningCall = true;
+    socket.emit('call_rejoin', { callId }, async (res) => {
+      isRejoiningCall = false;
+      if (!res || !res.ok || !res.call) {
+        try { sessionStorage.removeItem('chatbox_active_call'); } catch {}
+        cleanupCallState();
+        return;
+      }
+
+      const callInfo = res.call;
+      const peerInfo = callInfo.peer || {};
+      const peerName = (savedCall && savedCall.peerName) || peerInfo.name || 'User';
+      const peerAvatarUrl = (savedCall && savedCall.peerAvatarUrl) || peerInfo.avatarUrl || null;
+      const peerAvatarColor = (savedCall && savedCall.peerAvatarColor) ?? peerInfo.avatarColor ?? 0;
+      const callType = callInfo.callType || (savedCall && savedCall.callType) || 'audio';
+      const startTime = (savedCall && savedCall.startTime) || callInfo.acceptedAt || Date.now();
+
+      let localStream;
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({
+          audio: CALL_AUDIO_CONSTRAINTS,
+          video: callType === 'video' ? CALL_VIDEO_CONSTRAINTS : false,
+        });
+      } catch (err) {
+        console.warn('getUserMedia error on call rejoin:', err);
+        toast('Could not access microphone/camera to resume call');
+        try { sessionStorage.removeItem('chatbox_active_call'); } catch {}
+        socket.emit('call_end', { callId, reason: 'media-error' });
+        cleanupCallState();
+        return;
+      }
+
+      callState.callId = callId;
+      const currentUserId = state.user ? state.user.id : null;
+      callState.peerId = (callInfo.callerId === currentUserId) ? callInfo.calleeId : callInfo.callerId;
+      callState.localStream = localStream;
+      callState.startTime = startTime;
+
+      openActiveCallOverlay({
+        isInitiator: (callInfo.callerId === currentUserId),
+        callType,
+        peerName,
+        peerAvatarUrl,
+        peerAvatarColor,
+      });
+
+      if (callType === 'video' && el.activeCallLocalVideo) {
+        el.activeCallLocalVideo.srcObject = localStream;
+        el.activeCallLocalVideo.play().catch(() => {});
+        if (el.activeCallPip) el.activeCallPip.hidden = false;
+      }
+
+      if (savedCall && savedCall.isMuted) {
+        callState.isMuted = true;
+        localStream.getAudioTracks().forEach((t) => { t.enabled = false; });
+      }
+
+      if (savedCall && savedCall.isMinimized) {
+        callState.isMinimized = true;
+        if (el.activeCallOverlay) el.activeCallOverlay.classList.add('minimized');
+      }
+
+      updateCallControlButtons();
+      startCallTimer(startTime);
+      setCallStatusText('Reconnecting…');
+      persistActiveCallSession();
+
+      setupPeerConnection();
+
+      // Create reconnection offer
+      try {
+        const offer = await callState.pc.createOffer();
+        await callState.pc.setLocalDescription(offer);
+        socket.emit('call_signal', {
+          callId: callState.callId,
+          signal: { sdp: callState.pc.localDescription, isReconnect: true },
+        });
+        if (callType === 'video') {
+          notifyVideoState(true);
+        }
+      } catch (e) {
+        console.error('Failed to create reconnection offer:', e);
+      }
+    });
   }
 
   function endCall(reason = 'hangup') {
@@ -6997,6 +7242,7 @@
       el.activeCallOverlay.style.bottom = '';
       el.activeCallOverlay.hidden = true;
     }
+    try { sessionStorage.removeItem('chatbox_active_call'); } catch {}
   }
 
   function toggleCallMic() {
@@ -7007,6 +7253,7 @@
     callState.isMuted = !callState.isMuted;
     audioTrack.enabled = !callState.isMuted;
     updateCallControlButtons();
+    persistActiveCallSession();
   }
 
   async function toggleCallCam() {
@@ -7087,6 +7334,7 @@
     }
 
     updateCallControlButtons();
+    persistActiveCallSession();
   }
 
   async function toggleScreenShare() {
@@ -7189,6 +7437,7 @@
       el.activeCallOverlay.style.right = '';
       el.activeCallOverlay.style.bottom = '';
     }
+    persistActiveCallSession();
   }
 
   // Mouse & Touch Dragging for Minimized Call Window
