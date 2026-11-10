@@ -5,11 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="color-scheme" content="light dark">
   <meta name="app-base" content="{{BASE}}">
-  <title>chatbox</title>
+  <meta name="application-name" content="Chatbox">
+  <meta name="description" content="Fast, private real-time messaging, audio and video calling">
+  <meta name="theme-color" content="#0f1117" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Chatbox">
+  <title>Chatbox</title>
+  <link rel="manifest" href="{{BASE}}/manifest.webmanifest">
   <link rel="icon" type="image/svg+xml" href="{{BASE}}/static/favicon.svg?v={{VERSION}}">
   <link rel="shortcut icon" href="{{BASE}}/static/favicon.svg?v={{VERSION}}">
-  <link rel="alternate icon" href="{{BASE}}/static/favicon.svg?v={{VERSION}}">
-  <link rel="apple-touch-icon" href="{{BASE}}/static/favicon.svg?v={{VERSION}}">
+  <link rel="alternate icon" href="{{BASE}}/static/icons/icon-192.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="{{BASE}}/static/icons/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="{{BASE}}/static/icons/icon-192.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="{{BASE}}/static/icons/icon-512.png">
   <link rel="stylesheet" href="{{BASE}}/static/app.css?v={{VERSION}}">
   <style>
     [hidden] { display: none !important; }
@@ -206,6 +217,13 @@
         </div>
 
         <div class="rail-actions">
+          <button type="button" class="icon-btn install-btn" id="install-pwa-btn" title="Install Chatbox App" aria-label="Install Chatbox App" hidden>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+          </button>
           <button type="button" class="icon-btn" id="notif-btn" title="Enable browser notifications" aria-label="Notifications">
             <svg id="icon-bell" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
           </button>
@@ -1177,6 +1195,16 @@
         </svg>
       </button>
 
+      <!-- Flip Camera (Front/Back) on mobile/touch devices -->
+      <button type="button" class="call-ctrl-btn" id="call-flip-cam-btn" title="Flip Camera" aria-label="Flip Camera" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M20 10c0-4.418-3.582-8-8-8s-8 3.582-8 8c0 2.21 0.895 4.21 2.343 5.657L4 18"/>
+          <polyline points="1 14 4 14 4 18"/>
+          <path d="M4 14c0 4.418 3.582 8 8 8s8-3.582 8-8c0-2.21-0.895-4.21-2.343-5.657L20 6"/>
+          <polyline points="23 10 20 10 20 6"/>
+        </svg>
+      </button>
+
       <!-- Screen Share -->
       <button type="button" class="call-ctrl-btn" id="call-screen-share-btn" title="Share Screen" aria-label="Share Screen">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1197,6 +1225,87 @@
       </button>
     </div>
   </div>
+
+  <!-- Modal: Install App Guide -->
+  <dialog id="install-dialog" class="install-dialog" aria-labelledby="install-title">
+    <div class="dialog-card install-dialog-card">
+      <div class="dialog-header install-dialog-header">
+        <div class="dialog-title-wrap">
+          <svg viewBox="0 0 24 24" class="dialog-icon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          <h2 id="install-title">Install Chatbox</h2>
+        </div>
+        <button type="button" class="icon-btn close-dialog" data-dialog="install-dialog" aria-label="Close dialog">✕</button>
+      </div>
+
+      <div class="install-dialog-icon-wrap">
+        <img class="install-dialog-icon" src="{{BASE}}/static/icons/icon-192.png" alt="Chatbox App Icon" width="80" height="80">
+      </div>
+      <p class="dialog-desc">Install Chatbox for instant messaging, standalone window, notifications, and fast access from your home screen or dock.</p>
+
+      <!-- iOS Safari Instructions -->
+      <div class="install-steps" id="install-ios-steps" hidden>
+        <div class="install-step-item">
+          <span class="install-step-num">1</span>
+          <div class="install-step-text">
+            Tap the <strong>Share</strong> button
+            <svg class="install-step-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+            in Safari's bottom toolbar.
+          </div>
+        </div>
+        <div class="install-step-item">
+          <span class="install-step-num">2</span>
+          <div class="install-step-text">
+            Scroll down and tap <strong>Add to Home Screen</strong>
+            <svg class="install-step-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>.
+          </div>
+        </div>
+        <div class="install-step-item">
+          <span class="install-step-num">3</span>
+          <div class="install-step-text">
+            Tap <strong>Add</strong> in the top-right corner to finish installing.
+          </div>
+        </div>
+      </div>
+
+      <!-- Desktop / Android Default Instructions -->
+      <div class="install-steps" id="install-default-steps">
+        <div class="install-step-item">
+          <span class="install-step-num">✓</span>
+          <div class="install-step-text">
+            Instant launches directly from your taskbar, dock, or home screen.
+          </div>
+        </div>
+        <div class="install-step-item">
+          <span class="install-step-num">✓</span>
+          <div class="install-step-text">
+            Standalone native window with zero browser tab clutter.
+          </div>
+        </div>
+        <div class="install-step-item">
+          <span class="install-step-num">✓</span>
+          <div class="install-step-text">
+            Reliable real-time alerts and lightning-fast asset caching.
+          </div>
+        </div>
+      </div>
+
+      <div class="dialog-actions">
+        <button type="button" class="ghost close-dialog" data-dialog="install-dialog">Not Now</button>
+        <button type="button" class="primary" id="install-dialog-action-btn">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          <span>Install App</span>
+        </button>
+      </div>
+    </div>
+  </dialog>
 
   <!-- Toasts container for notifications -->
   <div class="toasts" id="toasts" role="status" aria-live="polite"></div>

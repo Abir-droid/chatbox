@@ -42,8 +42,19 @@ A self-hosted, full-featured real-time chat application with phone number authen
 7. **1-on-1 Voice & Video Calling (WebRTC)**:
    - High-definition peer-to-peer audio and video calls directly from direct message conversations.
    - Socket.IO signaling with automatic timeout handling, busy detection, and graceful disconnect cleanup.
-   - In-app incoming call dialog with synthesized melodic ringtones and answer/decline controls.
-   - Floating call overlay with microphone mute/unmute, camera toggle, screen sharing, duration timer, and minimize-to-widget mode.
+   - In-app incoming call dialog with synthesized melodic ringtones, mobile vibration, and answer/decline controls.
+   - Floating call overlay with microphone mute/unmute, camera toggle, mobile front/back camera flip, screen sharing, duration timer, and minimize-to-widget mode.
+
+8. **Progressive Web App (PWA) & Browser Installability**:
+   - Installable across all major browsers on **Phone** (Android Chrome/Samsung Internet, iOS Safari via "Add to Home Screen") and **PC** (Windows Chrome/Edge, macOS Chrome/Edge/Safari, Linux).
+   - Serves dynamically scoped `manifest.webmanifest` and Service Worker (`sw.js`) with support for root and subpath deployments (`APPLICATION_ROOT=/chatbox`).
+   - Rich icon bundle with 192x192, 512x512, Apple touch icons (180x180), and Android adaptive maskable icons.
+   - Offline fallback page and asset pre-caching for near-instant app shell loading.
+   - In-app Install prompt button with native Chromium trigger and iOS Safari guided walkthrough.
+
+9. **Deep Phone & PC Compatibility**:
+   - **Phone**: Notch and Dynamic Island safe-area awareness (`env(safe-area-inset-top)` / `bottom`), touch-action manipulation, Android hardware back-button / gesture support (`popstate`), mobile call vibration, and camera flip.
+   - **PC / Desktop**: Multi-column responsive layout, Window Controls Overlay (WCO) titlebar support, desktop keyboard shortcuts (`Ctrl+K` to search chats, `Esc` to dismiss modals/previews), and drag-and-drop file upload.
 
 ---
 
@@ -61,13 +72,17 @@ chatbox/
 ├── session.js           Signed session token creation and validation
 ├── views/index.html     App template (dynamic {{BASE}} for subpaths)
 ├── public/
-│   ├── app.js           Frontend application logic
-│   ├── app.css          Responsive stylesheet (Light/Dark themes)
+│   ├── app.js           Frontend application logic (PWA, WebRTC, realtime)
+│   ├── app.css          Responsive stylesheet (Light/Dark themes, safe areas)
+│   ├── sw.js            Service worker for offline caching & notifications
+│   ├── manifest.webmanifest Web App Manifest template
+│   ├── offline.html     Offline fallback page
 │   ├── theme.js         FOUC-preventing theme loader
 │   ├── favicon.svg      Vector icon
+│   ├── icons/           PWA icon set (192x192, 512x512, maskable, apple-touch)
 │   ├── fonts/           Self-hosted Figtree & Bricolage Grotesque fonts
 │   └── uploads/         Uploaded media files (.gitignored)
-├── test/                Session token tests (npm test)
+├── test/                Unit & PWA integration tests (npm test)
 ├── docs/architecture.md Project map and deployment notes
 ├── Dockerfile           Alpine production container for Coolify
 ├── .env.example         Environment template

@@ -595,6 +595,18 @@ function getIndexHtml() {
   }
 }
 
+const manifestRaw = fs.readFileSync(path.join(__dirname, 'public', 'manifest.webmanifest'), 'utf8');
+function getManifest() {
+  return manifestRaw.replaceAll('{{BASE}}', PREFIX);
+}
+
+const swRaw = fs.readFileSync(path.join(__dirname, 'public', 'sw.js'), 'utf8');
+function getServiceWorker() {
+  return swRaw
+    .replaceAll('{{BASE}}', PREFIX)
+    .replaceAll('{{VERSION}}', ASSET_VERSION);
+}
+
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', true);
@@ -615,6 +627,8 @@ app.use((req, res, next) => {
       "media-src 'self' data: blob:",
       "font-src 'self'",
       "connect-src 'self' ws: wss:",
+      "worker-src 'self' blob:",
+      "manifest-src 'self'",
       "object-src 'none'",
       "base-uri 'self'",
       "form-action 'self'",
@@ -632,6 +646,39 @@ app.get(['/favicon.ico', '/static/favicon.svg'], (req, res) => {
   res.setHeader('Expires', '0');
   res.sendFile(path.join(__dirname, 'public', 'favicon.svg'));
 });
+
+// Web App Manifest for PWA installation
+app.get(
+  ['/manifest.webmanifest', '/manifest.json', ...(PREFIX ? [`${PREFIX}/manifest.webmanifest`, `${PREFIX}/manifest.json`] : [])],
+  (req, res) => {
+    res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(getManifest());
+  }
+);
+
+// PWA Service Worker (served with Service-Worker-Allowed: /)
+app.get(
+  ['/sw.js', '/service-worker.js', ...(PREFIX ? [`${PREFIX}/sw.js`, `${PREFIX}/service-worker.js`] : [])],
+  (req, res) => {
+    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('Service-Worker-Allowed', '/');
+    res.send(getServiceWorker());
+  }
+);
+
+// Offline fallback page
+app.get(
+  ['/offline.html', ...(PREFIX ? [`${PREFIX}/offline.html`] : [])],
+  (req, res) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.sendFile(path.join(__dirname, 'public', 'offline.html'));
+  }
+);
 
 // Serve static assets and uploaded media with dynamic PostgreSQL restore
 const uploadRoutes = [

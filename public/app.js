@@ -77,6 +77,11 @@
     themeBtn: $('theme-btn'),
     iconMoon: $('icon-moon'),
     iconSun: $('icon-sun'),
+    installPwaBtn: $('install-pwa-btn'),
+    installDialog: $('install-dialog'),
+    installDialogActionBtn: $('install-dialog-action-btn'),
+    installIosSteps: $('install-ios-steps'),
+    installDefaultSteps: $('install-default-steps'),
     logoutBtn: $('logout-btn'),
 
     threadHead: $('thread-head'),
@@ -276,6 +281,7 @@
     activeCallControls: $('active-call-controls'),
     callToggleMicBtn: $('call-toggle-mic-btn'),
     callToggleCamBtn: $('call-toggle-cam-btn'),
+    callFlipCamBtn: $('call-flip-cam-btn'),
     callScreenShareBtn: $('call-screen-share-btn'),
     callHangupBtn: $('call-hangup-btn'),
 
@@ -525,6 +531,9 @@
       clearInterval(ringtoneTimer);
       ringtoneTimer = null;
     }
+    if ('vibrate' in navigator) {
+      try { navigator.vibrate(0); } catch {}
+    }
   }
 
   // Outgoing ringback tone: classic dual-tone (440Hz + 480Hz) 1.5s on, 3s off
@@ -593,7 +602,15 @@
     };
 
     playMelody();
-    ringtoneTimer = setInterval(playMelody, 2400);
+    if ('vibrate' in navigator) {
+      try { navigator.vibrate([400, 200, 400, 200, 800]); } catch {}
+    }
+    ringtoneTimer = setInterval(() => {
+      playMelody();
+      if ('vibrate' in navigator) {
+        try { navigator.vibrate([400, 200, 400, 200, 800]); } catch {}
+      }
+    }, 2400);
   }
 
   // Call ended / hangup tone
@@ -6374,6 +6391,11 @@
     const isDark = (document.documentElement.getAttribute('data-theme') || 'dark') === 'dark';
     el.iconMoon.hidden = isDark;
     el.iconSun.hidden = !isDark;
+    const themeColor = isDark ? '#0f1117' : '#ffffff';
+    try {
+      const metas = document.querySelectorAll('meta[name="theme-color"]');
+      metas.forEach((m) => m.setAttribute('content', themeColor));
+    } catch {}
   }
 
   el.themeBtn.onclick = toggleTheme;
@@ -6551,6 +6573,12 @@
       el.callScreenShareBtn.classList.remove('active-off');
       el.callScreenShareBtn.title = callState.isScreenSharing ? 'Stop Sharing Screen' : 'Share Screen';
       el.callScreenShareBtn.setAttribute('aria-label', el.callScreenShareBtn.title);
+    }
+
+    if (el.callFlipCamBtn) {
+      const showFlip = !callState.isCameraOff && !callState.isScreenSharing;
+      el.callFlipCamBtn.style.display = showFlip ? 'flex' : 'none';
+      el.callFlipCamBtn.classList.toggle('is-flipped', currentFacingMode === 'environment');
     }
   }
 
@@ -7337,6 +7365,57 @@
     persistActiveCallSession();
   }
 
+  let currentFacingMode = 'user';
+
+  async function flipCamera() {
+    if (!callState.active || !callState.pc || callState.isCameraOff) return;
+    currentFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
+
+    try {
+      let camStream;
+      try {
+        camStream = await navigator.mediaDevices.getUserMedia({
+          video: { ...CALL_VIDEO_CONSTRAINTS, facingMode: { exact: currentFacingMode } },
+        });
+      } catch {
+        camStream = await navigator.mediaDevices.getUserMedia({
+          video: { ...CALL_VIDEO_CONSTRAINTS, facingMode: currentFacingMode },
+        });
+      }
+
+      const camTrack = camStream.getVideoTracks()[0];
+      if (!camTrack) return;
+
+      if (!callState.localStream) {
+        callState.localStream = new MediaStream();
+      }
+      callState.localStream.getVideoTracks().forEach((t) => {
+        try { t.stop(); } catch {}
+        callState.localStream.removeTrack(t);
+      });
+      callState.localStream.addTrack(camTrack);
+
+      const sender = callState.pc.getSenders().find(
+        (s) => (s.track && s.track.kind === 'video') || s.kind === 'video'
+      );
+      if (sender) {
+        await sender.replaceTrack(camTrack);
+      }
+
+      if (el.activeCallLocalVideo) {
+        el.activeCallLocalVideo.srcObject = new MediaStream([camTrack]);
+        el.activeCallLocalVideo.play().catch(() => {});
+      }
+
+      if (el.callFlipCamBtn) {
+        el.callFlipCamBtn.classList.toggle('is-flipped', currentFacingMode === 'environment');
+      }
+    } catch (err) {
+      console.warn('Could not switch camera:', err);
+      toast('Could not switch camera');
+    }
+  }
+
   async function toggleScreenShare() {
     if (!callState.active || !callState.pc) return;
 
@@ -7547,6 +7626,9 @@
   if (el.callScreenShareBtn) {
     el.callScreenShareBtn.onclick = () => toggleScreenShare();
   }
+  if (el.callFlipCamBtn) {
+    el.callFlipCamBtn.onclick = () => flipCamera();
+  }
   if (el.activeCallMinBtn) {
     el.activeCallMinBtn.onclick = (e) => {
       e.stopPropagation();
@@ -7568,6 +7650,200 @@
 
   initMinimizedDragging();
 
+  /* ------------------------------------------------------------- PWA & Compatibility */
+  function initServiceWorker() {
+    if (!('serviceWorker' in navigator)) return;
+
+    window.addEventListener('load', () => {
+      const swUrl = `${BASE}/sw.js`;
+      navigator.serviceWorker
+        .register(swUrl, { scope: `${BASE}/` || '/' })
+        .then((reg) => {
+          reg.addEventListener('updatefound', () => {
+            const newWorker = reg.installing;
+            if (!newWorker) return;
+            newWorker.addEventListener('statechange', () => {
+              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                toast('Update available! Refreshing to apply…');
+                setTimeout(() => window.location.reload(), 1200);
+              }
+            });
+          });
+        })
+        .catch((err) => {
+          console.warn('[PWA] Service Worker registration failed:', err);
+        });
+    });
+  }
+
+  let deferredInstallPrompt = null;
+
+  function isAppStandalone() {
+    return (
+      window.matchMedia('(display-mode: standalone)').matches ||
+      window.matchMedia('(display-mode: window-controls-overlay)').matches ||
+      window.matchMedia('(display-mode: fullscreen)').matches ||
+      window.navigator.standalone === true
+    );
+  }
+
+  function initPwaInstall() {
+    if (isAppStandalone()) {
+      document.documentElement.classList.add('is-standalone');
+      if (el.installPwaBtn) el.installPwaBtn.hidden = true;
+      return;
+    }
+
+    const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+
+    // Listen for beforeinstallprompt on Chromium mobile & desktop
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredInstallPrompt = e;
+      if (el.installPwaBtn) el.installPwaBtn.hidden = false;
+    });
+
+    window.addEventListener('appinstalled', () => {
+      deferredInstallPrompt = null;
+      if (el.installPwaBtn) el.installPwaBtn.hidden = true;
+      if (el.installDialog && el.installDialog.open) el.installDialog.close();
+      toast('Chatbox installed successfully! Access it anytime from your home screen.');
+      document.documentElement.classList.add('is-standalone');
+    });
+
+    if (el.installPwaBtn) {
+      el.installPwaBtn.hidden = false;
+      el.installPwaBtn.onclick = () => {
+        if (deferredInstallPrompt) {
+          deferredInstallPrompt.prompt();
+          deferredInstallPrompt.userChoice.then((choice) => {
+            if (choice && choice.outcome === 'accepted') {
+              el.installPwaBtn.hidden = true;
+            }
+            deferredInstallPrompt = null;
+          });
+        } else {
+          // Open installation guide dialog
+          if (el.installDialog) {
+            if (isIos) {
+              if (el.installIosSteps) el.installIosSteps.hidden = false;
+              if (el.installDefaultSteps) el.installDefaultSteps.hidden = true;
+              if (el.installDialogActionBtn) el.installDialogActionBtn.hidden = true;
+            } else {
+              if (el.installIosSteps) el.installIosSteps.hidden = true;
+              if (el.installDefaultSteps) el.installDefaultSteps.hidden = false;
+              if (el.installDialogActionBtn) el.installDialogActionBtn.hidden = false;
+            }
+            try {
+              el.installDialog.showModal();
+            } catch {
+              el.installDialog.open = true;
+            }
+          }
+        }
+      };
+    }
+
+    if (el.installDialogActionBtn) {
+      el.installDialogActionBtn.onclick = () => {
+        if (deferredInstallPrompt) {
+          deferredInstallPrompt.prompt();
+          deferredInstallPrompt = null;
+        }
+        if (el.installDialog && el.installDialog.open) el.installDialog.close();
+      };
+    }
+  }
+
+  function initPlatformCompatibility() {
+    // 1. Online / Offline network status banners
+    window.addEventListener('online', () => {
+      if (el.banner) {
+        el.banner.classList.remove('offline-banner');
+        el.banner.hidden = true;
+      }
+      toast('Internet connection restored');
+    });
+
+    window.addEventListener('offline', () => {
+      if (el.banner) {
+        const text = el.banner.querySelector('span');
+        if (text) text.textContent = 'You are currently offline. Chatbox will reconnect when network returns.';
+        el.banner.classList.add('offline-banner');
+        el.banner.hidden = false;
+      }
+      toast('You are currently offline');
+    });
+
+    // 2. Hardware / Gesture Back Button handling (Android & Mobile)
+    window.addEventListener('popstate', () => {
+      if (el.lightboxDialog && el.lightboxDialog.open) {
+        closeLightbox();
+        return;
+      }
+      const openDialog = document.querySelector('dialog[open]');
+      if (openDialog) {
+        openDialog.close();
+        return;
+      }
+      if (el.app && el.app.classList.contains('rail-open')) {
+        closeRail();
+        return;
+      }
+      if (window.innerWidth <= 768 && state.activeConversationId) {
+        openRail();
+      }
+    });
+
+    // 3. Desktop Keyboard Shortcuts (PC / Mac)
+    window.addEventListener('keydown', (e) => {
+      // Ctrl+K / Cmd+K: Focus Search
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        if (el.railSearchInput) {
+          if (window.innerWidth <= 768) openRail();
+          el.railSearchInput.focus();
+          el.railSearchInput.select();
+        }
+        return;
+      }
+
+      // Escape key to dismiss modals, search, replies, etc.
+      if (e.key === 'Escape') {
+        if (el.lightboxDialog && el.lightboxDialog.open) {
+          closeLightbox();
+          return;
+        }
+        const openDialog = document.querySelector('dialog[open]');
+        if (openDialog) {
+          openDialog.close();
+          return;
+        }
+        if (el.emojiPicker && !el.emojiPicker.hidden) {
+          el.emojiPicker.hidden = true;
+          return;
+        }
+        if (el.replyPreviewBar && !el.replyPreviewBar.hidden) {
+          cancelReply();
+          return;
+        }
+        if (el.editPreviewBar && !el.editPreviewBar.hidden) {
+          cancelEdit();
+          return;
+        }
+        if (el.mediaPreviewBar && !el.mediaPreviewBar.hidden) {
+          clearSelectedMedia();
+          return;
+        }
+        if (el.railSearchInput && document.activeElement === el.railSearchInput) {
+          el.railSearchInput.value = '';
+          filterChatsAndFriends('');
+          el.railSearchInput.blur();
+        }
+      }
+    });
+  }
+
   /* ------------------------------------------------------------- init */
   if (!document.documentElement.getAttribute('data-theme')) {
     document.documentElement.setAttribute('data-theme', 'dark');
@@ -7575,5 +7851,8 @@
   paintTheme();
   initEmojiPicker();
   adjustInputHeight();
+  initServiceWorker();
+  initPwaInstall();
+  initPlatformCompatibility();
   checkInitialAuth();
 })();
