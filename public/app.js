@@ -134,6 +134,13 @@
     editBarSnippet: $('edit-bar-snippet'),
     editCancel: $('edit-cancel'),
 
+    linkPreviewBar: $('link-preview-bar'),
+    linkBarThumb: $('link-bar-thumb'),
+    linkBarImg: $('link-bar-img'),
+    linkBarTitle: $('link-bar-title'),
+    linkBarSnippet: $('link-bar-snippet'),
+    linkPreviewCancel: $('link-preview-cancel'),
+
     emojiBtn: $('emoji-btn'),
     emojiPicker: $('emoji-picker'),
 
@@ -642,6 +649,155 @@
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
+  }
+
+  const clientLinkPreviewCache = new Map();
+
+  function extractFirstUrl(text) {
+    if (!text || typeof text !== 'string') return null;
+    const urlRegex = /(?:https?:\/\/|www\.)[^\s<>()]+(?:\([^\s<>()]*\)|[^\s`!()\[\]{};:'".,<>?«»“”‘’])/i;
+    const m = text.match(urlRegex);
+    return m ? m[0] : null;
+  }
+
+  function formatMessageText(str) {
+    if (!str) return '';
+    const text = String(str);
+    const urlRegex = /(?:https?:\/\/|www\.)[^\s<>()]+(?:\([^\s<>()]*\)|[^\s`!()\[\]{};:'".,<>?«»“”‘’])/gi;
+
+    let result = '';
+    let lastIndex = 0;
+    let match;
+
+    while ((match = urlRegex.exec(text)) !== null) {
+      const matchIndex = match.index;
+      const matchedUrl = match[0];
+
+      if (matchIndex > lastIndex) {
+        result += escapeHtml(text.slice(lastIndex, matchIndex));
+      }
+
+      const href = /^www\./i.test(matchedUrl) ? `https://${matchedUrl}` : matchedUrl;
+      const safeHref = escapeHtml(href);
+      const safeDisplay = escapeHtml(matchedUrl);
+
+      result += `<a href="${safeHref}" target="_blank" rel="noopener noreferrer" class="chat-link" onclick="event.stopPropagation()">${safeDisplay}</a>`;
+
+      lastIndex = matchIndex + matchedUrl.length;
+    }
+
+    if (lastIndex < text.length) {
+      result += escapeHtml(text.slice(lastIndex));
+    }
+
+    return result;
+  }
+
+  function attachLinkPreview(container, text, insertBeforeEl) {
+    if (!container || !text) return;
+    const rawUrl = extractFirstUrl(text);
+    if (!rawUrl) return;
+
+    const targetUrl = /^www\./i.test(rawUrl) ? `https://${rawUrl}` : rawUrl;
+
+    let domainStr = '';
+    try {
+      domainStr = new URL(targetUrl).hostname.replace(/^www\./i, '');
+    } catch {
+      domainStr = rawUrl;
+    }
+
+    const previewCard = document.createElement('a');
+    previewCard.className = 'msg-link-preview is-loading';
+    previewCard.href = targetUrl;
+    previewCard.target = '_blank';
+    previewCard.rel = 'noopener noreferrer';
+    previewCard.title = 'Open link';
+    previewCard.onclick = (e) => e.stopPropagation();
+
+    previewCard.innerHTML = `
+      <div class="msg-link-preview-info">
+        <span class="msg-link-preview-domain">${escapeHtml(domainStr)}</span>
+        <div class="msg-link-preview-skeleton-bar" style="width: 70%"></div>
+        <div class="msg-link-preview-skeleton-bar" style="width: 45%"></div>
+      </div>
+    `;
+
+    if (insertBeforeEl && insertBeforeEl.parentNode === container) {
+      container.insertBefore(previewCard, insertBeforeEl);
+    } else {
+      container.appendChild(previewCard);
+    }
+
+    function populateCard(preview) {
+      previewCard.classList.remove('is-loading');
+      previewCard.replaceChildren();
+
+      if (preview.image) {
+        const thumbWrap = document.createElement('div');
+        thumbWrap.className = 'msg-link-preview-thumb';
+        const img = document.createElement('img');
+        img.src = preview.image;
+        img.alt = preview.title || 'Preview thumbnail';
+        img.loading = 'lazy';
+        img.onerror = () => {
+          thumbWrap.remove();
+        };
+        thumbWrap.appendChild(img);
+        previewCard.appendChild(thumbWrap);
+      }
+
+      const infoWrap = document.createElement('div');
+      infoWrap.className = 'msg-link-preview-info';
+
+      const domainEl = document.createElement('span');
+      domainEl.className = 'msg-link-preview-domain';
+      domainEl.textContent = preview.domain || preview.siteName || domainStr;
+      infoWrap.appendChild(domainEl);
+
+      if (preview.title) {
+        const titleEl = document.createElement('div');
+        titleEl.className = 'msg-link-preview-title';
+        titleEl.textContent = preview.title;
+        infoWrap.appendChild(titleEl);
+      }
+
+      if (preview.description) {
+        const descEl = document.createElement('div');
+        descEl.className = 'msg-link-preview-desc';
+        descEl.textContent = preview.description;
+        infoWrap.appendChild(descEl);
+      }
+
+      previewCard.appendChild(infoWrap);
+    }
+
+    const cached = clientLinkPreviewCache.get(targetUrl);
+    if (cached) {
+      if (cached.ok && cached.preview) {
+        populateCard(cached.preview);
+      } else {
+        previewCard.remove();
+      }
+      return;
+    }
+
+    api(`/api/link-preview?url=${encodeURIComponent(targetUrl)}`)
+      .then((data) => {
+        if (data && data.ok && data.preview) {
+          clientLinkPreviewCache.set(targetUrl, data);
+          if (previewCard.isConnected) {
+            populateCard(data.preview);
+          }
+        } else {
+          clientLinkPreviewCache.set(targetUrl, { ok: false });
+          if (previewCard.isConnected) previewCard.remove();
+        }
+      })
+      .catch(() => {
+        clientLinkPreviewCache.set(targetUrl, { ok: false });
+        if (previewCard.isConnected) previewCard.remove();
+      });
   }
 
   function renderAvatar(elem, name, colorIndex, avatarUrl, isOnline) {
@@ -1476,6 +1632,12 @@
         const textEl = row.querySelector('.bubble-text');
         if (textEl) {
           textEl.innerHTML = formatMessageText(text);
+          const bubble = textEl.closest('.bubble') || textEl.parentElement;
+          if (bubble) {
+            const oldPreview = bubble.querySelector('.msg-link-preview');
+            if (oldPreview) oldPreview.remove();
+            attachLinkPreview(bubble, text, textEl);
+          }
         }
         const metaEl = row.querySelector('.bubble-meta');
         if (metaEl && !metaEl.querySelector('.msg-edited-badge')) {
@@ -1950,6 +2112,7 @@
     cancelReply();
     cancelEdit();
     clearMediaSelection();
+    if (el.linkPreviewBar) el.linkPreviewBar.hidden = true;
 
     const conv = state.conversations.find((c) => c.id === convId);
     if (!conv) return;
@@ -2843,17 +3006,19 @@
 
       const textP = document.createElement('p');
       textP.className = 'bubble-text';
-      textP.textContent = msg.text;
+      textP.innerHTML = formatMessageText(msg.text);
       captionWrap.appendChild(textP);
       captionWrap.appendChild(bubbleMeta);
 
       bubble.appendChild(captionWrap);
+      attachLinkPreview(captionWrap, msg.text, textP);
     } else {
       if (msg.text) {
         const textP = document.createElement('p');
         textP.className = 'bubble-text';
-        textP.textContent = msg.text;
+        textP.innerHTML = formatMessageText(msg.text);
         bubble.appendChild(textP);
+        attachLinkPreview(bubble, msg.text, textP);
       }
       bubble.appendChild(bubbleMeta);
     }
@@ -3016,6 +3181,7 @@
 
     // Context menu (Right-click on desktop, long-press on mobile)
     bubble.addEventListener('contextmenu', (e) => {
+      if (e.target.closest('a')) return;
       e.preventDefault();
       if (!reactionBar.hidden) return;
       if (window.innerWidth <= 768) {
@@ -3035,6 +3201,7 @@
 
     bubble.addEventListener('touchstart', (e) => {
       if (state.selectionMode) return;
+      if (e.target.closest('a')) return;
       touchMoved = false;
       isSwiping = false;
       hasVibrated = false;
@@ -4103,6 +4270,8 @@
     adjustInputHeight();
     clearMediaSelection();
     cancelReply();
+    if (el.linkPreviewBar) el.linkPreviewBar.hidden = true;
+    dismissedPreviewUrl = null;
     playSendSound();
     el.input.focus();
 
@@ -4252,11 +4421,88 @@
     }
   }
 
+  // Live composer link preview (WhatsApp style)
+  let linkPreviewDebounce = null;
+  let dismissedPreviewUrl = null;
+
+  function showComposerPreviewData(preview) {
+    if (!el.linkPreviewBar) return;
+    el.linkPreviewBar.hidden = false;
+    el.linkBarTitle.textContent = preview.title || preview.domain || 'Link Preview';
+    el.linkBarSnippet.textContent = preview.description || preview.domain || '';
+    if (preview.image && el.linkBarThumb && el.linkBarImg) {
+      el.linkBarImg.src = preview.image;
+      el.linkBarThumb.hidden = false;
+    } else if (el.linkBarThumb) {
+      el.linkBarThumb.hidden = true;
+    }
+  }
+
+  function updateComposerLinkPreview() {
+    if (!el.linkPreviewBar) return;
+    const text = (el.input.value || '').trim();
+    const url = extractFirstUrl(text);
+
+    if (!url || url === dismissedPreviewUrl) {
+      el.linkPreviewBar.hidden = true;
+      return;
+    }
+
+    const targetUrl = /^www\./i.test(url) ? `https://${url}` : url;
+    let domainStr = '';
+    try {
+      domainStr = new URL(targetUrl).hostname.replace(/^www\./i, '');
+    } catch {
+      domainStr = url;
+    }
+
+    el.linkPreviewBar.hidden = false;
+    el.linkBarTitle.textContent = domainStr;
+    el.linkBarSnippet.textContent = 'Fetching preview…';
+    if (el.linkBarThumb) el.linkBarThumb.hidden = true;
+
+    const cached = clientLinkPreviewCache.get(targetUrl);
+    if (cached) {
+      if (cached.ok && cached.preview) {
+        showComposerPreviewData(cached.preview);
+      } else {
+        el.linkPreviewBar.hidden = true;
+      }
+      return;
+    }
+
+    api(`/api/link-preview?url=${encodeURIComponent(targetUrl)}`)
+      .then((data) => {
+        if (data && data.ok && data.preview) {
+          clientLinkPreviewCache.set(targetUrl, data);
+          if (extractFirstUrl(el.input.value) === url && !el.linkPreviewBar.hidden) {
+            showComposerPreviewData(data.preview);
+          }
+        } else {
+          clientLinkPreviewCache.set(targetUrl, { ok: false });
+          el.linkPreviewBar.hidden = true;
+        }
+      })
+      .catch(() => {
+        clientLinkPreviewCache.set(targetUrl, { ok: false });
+        el.linkPreviewBar.hidden = true;
+      });
+  }
+
+  if (el.linkPreviewCancel) {
+    el.linkPreviewCancel.onclick = () => {
+      dismissedPreviewUrl = extractFirstUrl(el.input.value);
+      if (el.linkPreviewBar) el.linkPreviewBar.hidden = true;
+    };
+  }
+
   // Typing indicator broadcast & typing sound effect
   let typingTimer = null;
   el.input.oninput = () => {
     adjustInputHeight();
     playTypingTick();
+    clearTimeout(linkPreviewDebounce);
+    linkPreviewDebounce = setTimeout(updateComposerLinkPreview, 400);
     if (!state.activeConversationId || !socket) return;
     socket.emit('typing', { conversationId: state.activeConversationId, typing: true });
     clearTimeout(typingTimer);

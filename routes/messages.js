@@ -1,5 +1,7 @@
 'use strict';
 
+const { fetchLinkPreview } = require('../link-preview');
+
 module.exports = function registerMessageRoutes(context) {
   const {
     app,
@@ -320,6 +322,20 @@ module.exports = function registerMessageRoutes(context) {
       if (isImage) return 'image';
       return 'file';
     }
+
+    // Link Preview: fetch OpenGraph metadata and thumbnail for URLs
+    app.get('/api/link-preview', authMiddleware, async (req, res) => {
+      const targetUrl = (req.query.url || '').trim();
+      if (!targetUrl) {
+        return res.status(400).json({ ok: false, error: 'URL parameter is required.' });
+      }
+      try {
+        const data = await fetchLinkPreview(targetUrl);
+        res.json(data);
+      } catch (err) {
+        res.status(422).json({ ok: false, error: err.message || 'Could not fetch link preview.' });
+      }
+    });
 
     // Media: Upload Photo / Video / Audio (Voice Message)
     app.post('/api/upload', authMiddleware, upload.single('media'), async (req, res) => {

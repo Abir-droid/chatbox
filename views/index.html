@@ -350,6 +350,20 @@
         </button>
       </div>
 
+      <!-- Link Preview Bar (when URL typed in composer) -->
+      <div class="reply-preview-bar link-preview-bar" id="link-preview-bar" hidden>
+        <div class="link-bar-thumb" id="link-bar-thumb" hidden>
+          <img id="link-bar-img" src="" alt="Thumbnail" />
+        </div>
+        <div class="reply-bar-content">
+          <span class="reply-bar-title" id="link-bar-title">Link Preview</span>
+          <span class="reply-bar-snippet" id="link-bar-snippet">Loading…</span>
+        </div>
+        <button type="button" class="icon-btn reply-close" id="link-preview-cancel" title="Dismiss preview" aria-label="Dismiss preview">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+
       <!-- File Preview Bar (when media selected) -->
       <div class="media-preview-bar" id="media-preview-bar" hidden>
         <div class="media-previews-wrap" id="media-previews-wrap"></div>
