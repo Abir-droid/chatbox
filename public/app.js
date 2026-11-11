@@ -698,13 +698,16 @@
     const rawUrl = extractFirstUrl(text);
     if (!rawUrl) return;
 
+    const bubble = container.classList.contains('bubble') ? container : container.closest('.bubble');
+    if (bubble) bubble.classList.add('has-link-preview');
+
     const targetUrl = /^www\./i.test(rawUrl) ? `https://${rawUrl}` : rawUrl;
 
     let domainStr = '';
     try {
-      domainStr = new URL(targetUrl).hostname.replace(/^www\./i, '');
+      domainStr = new URL(targetUrl).hostname.replace(/^www\./i, '').toLowerCase();
     } catch {
-      domainStr = rawUrl;
+      domainStr = rawUrl.toLowerCase();
     }
 
     const previewCard = document.createElement('a');
@@ -717,9 +720,12 @@
 
     previewCard.innerHTML = `
       <div class="msg-link-preview-info">
-        <span class="msg-link-preview-domain">${escapeHtml(domainStr)}</span>
-        <div class="msg-link-preview-skeleton-bar" style="width: 70%"></div>
-        <div class="msg-link-preview-skeleton-bar" style="width: 45%"></div>
+        <div class="msg-link-preview-skeleton-bar" style="width: 78%"></div>
+        <div class="msg-link-preview-skeleton-bar" style="width: 50%"></div>
+        <div class="msg-link-preview-domain">
+          <svg viewBox="0 0 24 24" class="msg-link-icon" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          <span>${escapeHtml(domainStr)}</span>
+        </div>
       </div>
     `;
 
@@ -727,6 +733,14 @@
       container.insertBefore(previewCard, insertBeforeEl);
     } else {
       container.appendChild(previewCard);
+    }
+
+    function removePreview() {
+      previewCard.remove();
+      if (bubble) {
+        const remaining = bubble.querySelector('.msg-link-preview');
+        if (!remaining) bubble.classList.remove('has-link-preview');
+      }
     }
 
     function populateCard(preview) {
@@ -750,11 +764,6 @@
       const infoWrap = document.createElement('div');
       infoWrap.className = 'msg-link-preview-info';
 
-      const domainEl = document.createElement('span');
-      domainEl.className = 'msg-link-preview-domain';
-      domainEl.textContent = preview.domain || preview.siteName || domainStr;
-      infoWrap.appendChild(domainEl);
-
       if (preview.title) {
         const titleEl = document.createElement('div');
         titleEl.className = 'msg-link-preview-title';
@@ -769,6 +778,12 @@
         infoWrap.appendChild(descEl);
       }
 
+      const domainEl = document.createElement('div');
+      domainEl.className = 'msg-link-preview-domain';
+      const cleanDomain = (preview.domain || domainStr).toLowerCase();
+      domainEl.innerHTML = `<svg viewBox="0 0 24 24" class="msg-link-icon" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg><span>${escapeHtml(cleanDomain)}</span>`;
+      infoWrap.appendChild(domainEl);
+
       previewCard.appendChild(infoWrap);
     }
 
@@ -777,7 +792,7 @@
       if (cached.ok && cached.preview) {
         populateCard(cached.preview);
       } else {
-        previewCard.remove();
+        removePreview();
       }
       return;
     }
@@ -791,12 +806,12 @@
           }
         } else {
           clientLinkPreviewCache.set(targetUrl, { ok: false });
-          if (previewCard.isConnected) previewCard.remove();
+          if (previewCard.isConnected) removePreview();
         }
       })
       .catch(() => {
         clientLinkPreviewCache.set(targetUrl, { ok: false });
-        if (previewCard.isConnected) previewCard.remove();
+        if (previewCard.isConnected) removePreview();
       });
   }
 
@@ -3000,27 +3015,46 @@
 
     if (isCallMsg) {
       renderCallBubble(bubble, msg, isOwn, bubbleMeta);
-    } else if (bubble.classList.contains('has-media') && msg.text) {
-      const captionWrap = document.createElement('div');
-      captionWrap.className = 'bubble-caption-wrap';
-
-      const textP = document.createElement('p');
-      textP.className = 'bubble-text';
-      textP.innerHTML = formatMessageText(msg.text);
-      captionWrap.appendChild(textP);
-      captionWrap.appendChild(bubbleMeta);
-
-      bubble.appendChild(captionWrap);
-      attachLinkPreview(captionWrap, msg.text, textP);
     } else {
-      if (msg.text) {
+      const firstUrl = msg.text ? extractFirstUrl(msg.text) : null;
+
+      if (bubble.classList.contains('has-media') && msg.text) {
+        const captionWrap = document.createElement('div');
+        captionWrap.className = 'bubble-caption-wrap';
+
         const textP = document.createElement('p');
         textP.className = 'bubble-text';
         textP.innerHTML = formatMessageText(msg.text);
-        bubble.appendChild(textP);
-        attachLinkPreview(bubble, msg.text, textP);
+        captionWrap.appendChild(textP);
+        captionWrap.appendChild(bubbleMeta);
+
+        bubble.appendChild(captionWrap);
+        if (firstUrl) {
+          attachLinkPreview(captionWrap, msg.text, textP);
+        }
+      } else if (firstUrl) {
+        bubble.classList.add('has-link-preview');
+
+        const captionWrap = document.createElement('div');
+        captionWrap.className = 'bubble-caption-wrap';
+
+        const textP = document.createElement('p');
+        textP.className = 'bubble-text';
+        textP.innerHTML = formatMessageText(msg.text);
+        captionWrap.appendChild(textP);
+        captionWrap.appendChild(bubbleMeta);
+
+        attachLinkPreview(bubble, msg.text, captionWrap);
+        bubble.appendChild(captionWrap);
+      } else {
+        if (msg.text) {
+          const textP = document.createElement('p');
+          textP.className = 'bubble-text';
+          textP.innerHTML = formatMessageText(msg.text);
+          bubble.appendChild(textP);
+        }
+        bubble.appendChild(bubbleMeta);
       }
-      bubble.appendChild(bubbleMeta);
     }
 
     // Message reactions container

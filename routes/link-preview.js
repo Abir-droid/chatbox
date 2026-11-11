@@ -267,6 +267,13 @@ async function fetchLinkPreview(targetUrl) {
       description = description.slice(0, 247) + '…';
     }
 
+    const isYouTube = domain === 'youtube.com' || domain === 'youtu.be' || domain.endsWith('.youtube.com');
+    if (isYouTube) {
+      siteName = 'YouTube';
+      domain = 'youtube.com';
+      if (title) title = title.replace(/\s*-\s*YouTube$/i, '').trim();
+    }
+
     // If neither title nor image found, we don't have enough for a useful preview
     if (!title && !image && !description) {
       throw new Error('No OpenGraph or HTML title metadata found');
