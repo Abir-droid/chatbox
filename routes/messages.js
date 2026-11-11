@@ -1,6 +1,11 @@
 'use strict';
 
-const { fetchLinkPreview } = require('../link-preview');
+let fetchLinkPreview;
+try {
+  fetchLinkPreview = require('./link-preview').fetchLinkPreview;
+} catch {
+  fetchLinkPreview = require('../link-preview').fetchLinkPreview;
+}
 
 module.exports = function registerMessageRoutes(context) {
   const {
