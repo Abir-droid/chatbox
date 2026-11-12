@@ -1,6 +1,15 @@
 # chatbox
 
+[![Download Android APK](https://img.shields.io/badge/Download-Android%20APK-brightgreen?logo=android&style=for-the-badge)](https://github.com/Abir-droid/chatbox/releases/latest)
+
 A self-hosted, full-featured real-time chat application with phone number authentication, 1-on-1 direct messaging, group chats, friend lists, emoji & media (photo/video), soft deletion, browser notifications, and an administrator audit & moderation dashboard.
+
+### 📱 Android Mobile App
+Download and install the latest APK directly on any Android device:
+- **Direct Download:** [Chatbox.apk](https://github.com/Abir-droid/chatbox/releases/latest/download/Chatbox.apk)
+- **Releases Section:** [All Releases & Changelog](https://github.com/Abir-droid/chatbox/releases)
+
+---
 
 - **Server:** Node.js, Express, Socket.IO, Multer
 - **Database:** PostgreSQL (`pg`), prefixed `chat_*` tables created automatically

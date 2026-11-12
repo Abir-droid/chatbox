@@ -3,7 +3,11 @@ name: Build Android APK
 on:
   push:
     branches: [ main ]
+    tags: [ 'v*' ]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -92,3 +96,38 @@ jobs:
           name: chatbox-debug-apk
           path: android/app/build/outputs/apk/debug/*.apk
           retention-days: 14
+
+      - name: Prepare APKs for GitHub Release
+        run: |
+          mkdir -p release-apks
+          cp android/app/build/outputs/apk/release/*.apk release-apks/Chatbox.apk
+          cp android/app/build/outputs/apk/debug/*.apk release-apks/Chatbox-Debug.apk
+          ls -lh release-apks/
+
+      - name: Publish to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'latest' }}
+          name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'Chatbox Android App' }}
+          body: |
+            ### 📱 Chatbox Android Release
+            
+            Install Chatbox directly on your Android phone!
+            
+            - **Chatbox.apk**: Production Release APK signed with persistent keystore.
+            - **Chatbox-Debug.apk**: Debug build with developer logging.
+            
+            #### Features & Fixes:
+            - Real-time messaging, audio/video notes & media sharing
+            - High-priority background push notifications for calls and messages
+            - Incoming video and audio calls wake the device when closed or locked
+            - Front & Rear camera flip button in video calls
+            - Draggable mini video preview (PIP) with edge snapping
+            - In-place updates without needing to uninstall previous version
+          draft: false
+          prerelease: false
+          files: |
+            release-apks/Chatbox.apk
+            release-apks/Chatbox-Debug.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
