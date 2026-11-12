@@ -26,8 +26,10 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Accept Android SDK Licenses
-        run: yes | sdkmanager --licenses || true
+      - name: Install Android Platform 35 & Accept Licenses
+        run: |
+          yes | sdkmanager --licenses || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
       - name: Install Node Dependencies
         run: npm ci
@@ -39,9 +41,21 @@ jobs:
         run: chmod +x android/gradlew
 
       - name: Build Debug APK
+        id: build
+        continue-on-error: true
         run: |
           cd android
-          ./gradlew assembleDebug --stacktrace --no-daemon
+          ./gradlew assembleDebug --stacktrace --no-daemon 2>&1 | tee ../gradle_output.txt
+          exit ${PIPESTATUS[0]}
+
+      - name: Show Gradle Error on Failure
+        if: steps.build.outcome == 'failure'
+        run: |
+          echo "### ❌ Gradle Build Error Details" >> $GITHUB_STEP_SUMMARY
+          echo '```text' >> $GITHUB_STEP_SUMMARY
+          tail -n 80 gradle_output.txt >> $GITHUB_STEP_SUMMARY || true
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          exit 1
 
       - name: List Generated APKs
         run: find android/ -name "*.apk"
