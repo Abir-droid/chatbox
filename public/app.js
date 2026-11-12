@@ -7030,7 +7030,8 @@
     }
 
     if (el.callFlipCamBtn) {
-      const showFlip = !callState.isCameraOff && !callState.isScreenSharing;
+      const showFlip = callState.callType === 'video' && !callState.isCameraOff && !callState.isScreenSharing;
+      el.callFlipCamBtn.hidden = !showFlip;
       el.callFlipCamBtn.style.display = showFlip ? 'flex' : 'none';
       el.callFlipCamBtn.classList.toggle('is-flipped', currentFacingMode === 'environment');
     }
@@ -7125,6 +7126,16 @@
     }
 
     setCallStatusText(isInitiator ? 'Calling…' : 'Connecting…');
+
+    currentFacingMode = 'user';
+    if (el.callFlipCamBtn) el.callFlipCamBtn.classList.remove('is-flipped');
+    if (el.activeCallLocalVideo) el.activeCallLocalVideo.classList.remove('no-mirror');
+    if (el.activeCallPip) {
+      el.activeCallPip.style.left = '';
+      el.activeCallPip.style.top = '';
+      el.activeCallPip.style.right = '';
+      el.activeCallPip.style.bottom = '';
+    }
 
     updateCallControlButtons();
 
@@ -7875,11 +7886,17 @@
       if (el.activeCallLocalVideo) {
         el.activeCallLocalVideo.srcObject = new MediaStream([camTrack]);
         el.activeCallLocalVideo.play().catch(() => {});
+        el.activeCallLocalVideo.classList.toggle('no-mirror', currentFacingMode === 'environment');
       }
 
       if (el.callFlipCamBtn) {
         el.callFlipCamBtn.classList.toggle('is-flipped', currentFacingMode === 'environment');
       }
+
+      if (navigator.vibrate) {
+        try { navigator.vibrate(35); } catch {}
+      }
+      toast(currentFacingMode === 'environment' ? 'Switched to rear camera' : 'Switched to front camera');
     } catch (err) {
       console.warn('Could not switch camera:', err);
       toast('Could not switch camera');
@@ -8071,6 +8088,102 @@
     el.activeCallOverlay.addEventListener('touchstart', onDragStart, { passive: true });
   }
 
+  const pipDragData = {
+    isDragging: false,
+    hasMoved: false,
+    startX: 0,
+    startY: 0,
+    initialLeft: 0,
+    initialTop: 0,
+  };
+
+  function initPipDragging() {
+    const pip = el.activeCallPip;
+    if (!pip) return;
+
+    const onPipStart = (e) => {
+      if (pip.hidden || callState.isMinimized) return;
+      const clientX = e.type.startsWith('touch') ? e.touches[0].clientX : e.clientX;
+      const clientY = e.type.startsWith('touch') ? e.touches[0].clientY : e.clientY;
+
+      const rect = pip.getBoundingClientRect();
+      pipDragData.isDragging = true;
+      pipDragData.hasMoved = false;
+      pipDragData.startX = clientX;
+      pipDragData.startY = clientY;
+      pipDragData.initialLeft = rect.left;
+      pipDragData.initialTop = rect.top;
+
+      window.addEventListener('mousemove', onPipMove, { passive: false });
+      window.addEventListener('mouseup', onPipEnd);
+      window.addEventListener('touchmove', onPipMove, { passive: false });
+      window.addEventListener('touchend', onPipEnd);
+    };
+
+    const onPipMove = (e) => {
+      if (!pipDragData.isDragging) return;
+      const clientX = e.type.startsWith('touch') ? e.touches[0].clientX : e.clientX;
+      const clientY = e.type.startsWith('touch') ? e.touches[0].clientY : e.clientY;
+
+      const dx = clientX - pipDragData.startX;
+      const dy = clientY - pipDragData.startY;
+
+      if (Math.hypot(dx, dy) > 5) {
+        pipDragData.hasMoved = true;
+        pip.classList.add('is-dragging');
+      }
+
+      if (pipDragData.hasMoved) {
+        if (e.cancelable) e.preventDefault();
+        const pipW = pip.offsetWidth || 110;
+        const pipH = pip.offsetHeight || 154;
+        const minLeft = 8;
+        const maxLeft = Math.max(8, window.innerWidth - pipW - 8);
+        const minTop = 40;
+        const maxTop = Math.max(40, window.innerHeight - pipH - 70);
+
+        const newLeft = Math.min(Math.max(pipDragData.initialLeft + dx, minLeft), maxLeft);
+        const newTop = Math.min(Math.max(pipDragData.initialTop + dy, minTop), maxTop);
+
+        pip.style.left = `${newLeft}px`;
+        pip.style.top = `${newTop}px`;
+        pip.style.right = 'auto';
+        pip.style.bottom = 'auto';
+      }
+    };
+
+    const onPipEnd = () => {
+      if (!pipDragData.isDragging) return;
+      pipDragData.isDragging = false;
+      pip.classList.remove('is-dragging');
+
+      window.removeEventListener('mousemove', onPipMove);
+      window.removeEventListener('mouseup', onPipEnd);
+      window.removeEventListener('touchmove', onPipMove);
+      window.removeEventListener('touchend', onPipEnd);
+
+      if (pipDragData.hasMoved) {
+        const rect = pip.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const snapLeft = centerX < window.innerWidth / 2;
+        pip.style.transition = 'left 0.25s cubic-bezier(0.16, 1, 0.3, 1), right 0.25s cubic-bezier(0.16, 1, 0.3, 1)';
+        if (snapLeft) {
+          pip.style.left = '14px';
+          pip.style.right = 'auto';
+        } else {
+          pip.style.left = `${Math.max(14, window.innerWidth - rect.width - 14)}px`;
+          pip.style.right = 'auto';
+        }
+        setTimeout(() => {
+          pip.style.transition = '';
+        }, 280);
+      }
+    };
+
+    pip.addEventListener('mousedown', onPipStart);
+    pip.addEventListener('touchstart', onPipStart, { passive: true });
+  }
+
   // Bind Calling UI Event Listeners
   if (el.startVoiceCallBtn) {
     el.startVoiceCallBtn.onclick = () => initiateCall('audio');
@@ -8119,6 +8232,15 @@
   }
 
   initMinimizedDragging();
+  initPipDragging();
+
+  if (el.activeCallRemoteVideo) {
+    el.activeCallRemoteVideo.addEventListener('dblclick', () => {
+      const isCover = el.activeCallRemoteVideo.style.objectFit === 'cover';
+      el.activeCallRemoteVideo.style.objectFit = isCover ? 'contain' : 'cover';
+      toast(isCover ? 'Fit to screen' : 'Zoom to fill');
+    });
+  }
 
   /* ------------------------------------------------------------- PWA & Compatibility */
   function initServiceWorker() {
