@@ -26,6 +26,8 @@ const registerContactRoutes = require('./routes/contacts');
 const registerConversationRoutes = require('./routes/conversations');
 const registerMessageRoutes = require('./routes/messages');
 const registerAdminRoutes = require('./routes/admin');
+const registerPushRoutes = require('./routes/push');
+const pushService = require('./push');
 
 let heicConvert = null;
 try {
@@ -229,6 +231,8 @@ async function initDatabase() {
         CREATE INDEX IF NOT EXISTS idx_chat_friend_requests_sender ON chat_friend_requests (sender_id, status);
         CREATE INDEX IF NOT EXISTS idx_chat_reactions_msg ON chat_message_reactions (message_id);
       `);
+
+      await pushService.initPushSchema(pool);
 
       try {
         await pool.query(`
@@ -918,6 +922,10 @@ function cleanupCall(callId, reason = 'ended') {
     console.error('recordCallMessage failed:', err);
   });
 
+  // Dismiss incoming call ring screen on devices
+  pushService.sendCallDismissPush(pool, call.calleeId, callId, reason).catch(() => {});
+  pushService.sendCallDismissPush(pool, call.callerId, callId, reason).catch(() => {});
+
   return call;
 }
 
@@ -1015,6 +1023,8 @@ async function getMessagesReactions(messageIds) {
   registerMessageRoutes(routeContext);
 
   registerAdminRoutes(routeContext);
+
+  registerPushRoutes(routeContext);
 
 // Page HTML
 app.get('/', (req, res) => {
@@ -1260,6 +1270,20 @@ io.on('connection', async (socket) => {
           },
         });
       }
+
+      const recipientIds = members.rows
+        .map((m) => Number(m.user_id))
+        .filter((id) => id !== user.id);
+
+      pushService.sendMessagePush(pool, recipientIds, {
+        senderId: user.id,
+        senderName: (latestUser && latestUser.name) || user.name,
+        conversationId: convId,
+        text: snippetText,
+        mediaType,
+        isGroup: conv.type === 'group',
+        groupName: conv.type === 'group' ? conv.name : null,
+      }).catch((e) => console.warn('[FCM] Push send error:', e.message));
 
       reply({ ok: true, id: msg.id, tempId });
     } catch (err) {
@@ -1563,6 +1587,20 @@ io.on('connection', async (socket) => {
       conversationId: convId,
       callType,
     });
+
+    // Send high-priority background FCM call alert to device
+    pushService.sendCallPush(pool, targetUserId, {
+      callId,
+      caller: {
+        id: user.id,
+        name: user.name,
+        phone: user.phone,
+        avatarUrl: user.avatar_url,
+        avatarColor: user.avatar_color,
+      },
+      conversationId: convId,
+      callType,
+    }).catch((e) => console.warn('[FCM] Call push error:', e.message));
 
     reply({ ok: true, callId });
   });

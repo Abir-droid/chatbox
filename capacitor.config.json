@@ -1,0 +1,15 @@
+{
+  "appId": "com.chatbox.app",
+  "appName": "Chatbox",
+  "webDir": "public",
+  "server": {
+    "url": "https://abirdroid.ddns.net/chatbox",
+    "cleartext": true,
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "PushNotifications": {
+      "presentationOptions": ["badge", "sound", "alert"]
+    }
+  }
+}

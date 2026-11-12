@@ -308,6 +308,7 @@
     editingTarget: null,
     typers: new Map(),
     notificationsEnabled: typeof Notification !== 'undefined' && Notification.permission === 'granted',
+    nativePushToken: null,
     selectionMode: false,
     selectedMessageIds: new Set(),
     selectedForwardTargets: new Set(),
@@ -952,6 +953,86 @@
     });
   }
 
+  let nativePushInitialized = false;
+  async function initNativePush() {
+    if (nativePushInitialized) return;
+    const Cap = window.Capacitor;
+    if (!Cap) return;
+
+    const Push = Cap.Plugins && Cap.Plugins.PushNotifications;
+    if (!Push) return;
+
+    try {
+      let perm = await Push.checkPermissions();
+      if (perm && perm.receive === 'prompt') {
+        perm = await Push.requestPermissions();
+      }
+      if (perm && perm.receive !== 'granted') {
+        console.warn('[Push] Android notification permission status:', perm.receive);
+        return;
+      }
+
+      // Create Android channels for chat & calls
+      if (typeof Push.createChannel === 'function') {
+        try {
+          await Push.createChannel({
+            id: 'chat_messages',
+            name: 'Chat Messages',
+            description: 'Notifications for new chat messages',
+            importance: 4,
+            visibility: 1,
+            sound: 'default',
+            vibration: true,
+          });
+          await Push.createChannel({
+            id: 'incoming_calls',
+            name: 'Incoming Calls',
+            description: 'Alerts and rings for incoming calls',
+            importance: 5,
+            visibility: 1,
+            sound: 'default',
+            vibration: true,
+          });
+        } catch (chanErr) {}
+      }
+
+      await Push.register();
+      nativePushInitialized = true;
+
+      Push.addListener('registration', async (token) => {
+        if (!token || !token.value) return;
+        state.nativePushToken = token.value;
+        try {
+          await api('/api/push/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: token.value, platform: 'android' }),
+          });
+          console.log('[Push] Device token registered successfully');
+        } catch (e) {
+          console.warn('[Push] Failed to register token with server:', e.message);
+        }
+      });
+
+      Push.addListener('registrationError', (err) => {
+        console.warn('[Push] Registration error:', err);
+      });
+
+      Push.addListener('pushNotificationReceived', (notification) => {
+        console.log('[Push] Notification received in app:', notification);
+      });
+
+      Push.addListener('pushNotificationActionPerformed', (action) => {
+        const notifData = (action && action.notification && action.notification.data) || {};
+        if (notifData.conversationId) {
+          openConversation(Number(notifData.conversationId));
+        }
+      });
+    } catch (err) {
+      console.warn('[Push] initNativePush error:', err);
+    }
+  }
+
   /* ------------------------------------------------------------- phone & country normalization */
   function getNormalizedPhone(countrySelect, phoneInput) {
     if (!phoneInput) return '';
@@ -1267,6 +1348,14 @@
   function logout() {
     cleanupCallState();
     saveActiveConversation(null);
+    if (state.nativePushToken) {
+      api('/api/push/unregister', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: state.nativePushToken }),
+      }).catch(() => {});
+      state.nativePushToken = null;
+    }
     state.token = '';
     state.user = null;
     localStorage.removeItem('chatbox_token');
@@ -1317,6 +1406,7 @@
     loadFriendRequests();
     hideLoader();
     checkNotificationPrompt();
+    initNativePush();
   }
 
   /* ------------------------------------------------------------- socket */
