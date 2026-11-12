@@ -5,6 +5,7 @@ google-services.json
 !android/app/google-services.json
 *.keystore
 *.jks
+!android/app/chatbox-release.keystore
 npm-debug.log*
 .DS_Store
 Thumbs.db

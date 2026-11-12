@@ -49,12 +49,12 @@ jobs:
       - name: Make Gradle Wrapper Executable
         run: chmod +x android/gradlew
 
-      - name: Build Debug APK
+      - name: Build Release & Debug APKs
         id: build
         continue-on-error: true
         run: |
           cd android
-          ./gradlew assembleDebug --stacktrace --no-daemon 2>&1 | tee ../gradle_output.txt
+          ./gradlew assembleRelease assembleDebug --stacktrace --no-daemon 2>&1 | tee ../gradle_output.txt
           exit ${PIPESTATUS[0]}
 
       - name: Show Gradle Error on Failure
@@ -79,7 +79,14 @@ jobs:
       - name: List Generated APKs
         run: find android/ -name "*.apk"
 
-      - name: Upload APK Artifact
+      - name: Upload Release APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chatbox-release-apk
+          path: android/app/build/outputs/apk/release/*.apk
+          retention-days: 14
+
+      - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: chatbox-debug-apk
