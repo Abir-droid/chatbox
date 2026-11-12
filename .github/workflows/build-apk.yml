@@ -55,7 +55,17 @@ jobs:
           echo '```text' >> $GITHUB_STEP_SUMMARY
           tail -n 80 gradle_output.txt >> $GITHUB_STEP_SUMMARY || true
           echo '```' >> $GITHUB_STEP_SUMMARY
-          exit 1
+
+      - name: Upload Build Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-build-log
+          path: gradle_output.txt
+
+      - name: Fail If Build Failed
+        if: steps.build.outcome == 'failure'
+        run: exit 1
 
       - name: List Generated APKs
         run: find android/ -name "*.apk"
