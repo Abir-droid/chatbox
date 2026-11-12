@@ -954,7 +954,28 @@
   }
 
   let nativePushInitialized = false;
+
+  async function syncNativePushToken(overrideToken) {
+    const token = overrideToken || state.nativePushToken || localStorage.getItem('chatbox_native_push_token');
+    if (!token || !state.token) return;
+    state.nativePushToken = token;
+    try {
+      localStorage.setItem('chatbox_native_push_token', token);
+      await api('/api/push/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, platform: 'android' }),
+      });
+      console.log('[Push] Device token synced successfully with server for user:', state.user?.id);
+    } catch (e) {
+      console.warn('[Push] Failed to sync token with server:', e.message);
+    }
+  }
+
   async function initNativePush() {
+    // If we already have a cached hardware push token, sync it immediately with server
+    syncNativePushToken();
+
     if (nativePushInitialized) return;
     const Cap = window.Capacitor;
     if (!Cap) return;
@@ -985,7 +1006,7 @@
             vibration: true,
           });
           await Push.createChannel({
-            id: 'incoming_calls',
+            id: 'incoming_calls_v2',
             name: 'Incoming Calls',
             description: 'Alerts and rings for incoming calls',
             importance: 5,
@@ -1002,16 +1023,8 @@
       Push.addListener('registration', async (token) => {
         if (!token || !token.value) return;
         state.nativePushToken = token.value;
-        try {
-          await api('/api/push/register', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: token.value, platform: 'android' }),
-          });
-          console.log('[Push] Device token registered successfully');
-        } catch (e) {
-          console.warn('[Push] Failed to register token with server:', e.message);
-        }
+        localStorage.setItem('chatbox_native_push_token', token.value);
+        await syncNativePushToken(token.value);
       });
 
       Push.addListener('registrationError', (err) => {
@@ -1355,16 +1368,20 @@
       if (window.location.hash) {
         history.replaceState(null, '', window.location.pathname);
       }
+      document.cookie = 'chatbox_token=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
     } catch (e) {}
 
-    if (state.nativePushToken) {
+    const tokenToUnregister = state.nativePushToken || localStorage.getItem('chatbox_native_push_token');
+    if (tokenToUnregister) {
       api('/api/push/unregister', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: state.nativePushToken }),
+        body: JSON.stringify({ token: tokenToUnregister }),
       }).catch(() => {});
       state.nativePushToken = null;
     }
+    nativePushInitialized = false;
+
     state.token = '';
     state.user = null;
     state.conversations = [];
@@ -1388,6 +1405,11 @@
     }
     if (el.convTitle) el.convTitle.textContent = '';
     if (el.convSub) el.convSub.textContent = '';
+    if (el.input) {
+      el.input.value = '';
+      el.input.disabled = true;
+    }
+    if (el.send) el.send.disabled = true;
 
     if (socket) socket.disconnect();
     el.app.hidden = true;
@@ -1418,6 +1440,29 @@
     el.authScreen.hidden = true;
     el.app.hidden = false;
 
+    // Clean previous DOM lists & message views so no previous user data can ever show
+    state.conversations = [];
+    state.friends = [];
+    state.friendRequests = [];
+    state.activeConversationId = null;
+    state.messagesCache.clear();
+    if (el.chatList) el.chatList.replaceChildren();
+    if (el.messages) el.messages.replaceChildren();
+    if (el.friendList) el.friendList.replaceChildren();
+    if (el.requestsList) el.requestsList.replaceChildren();
+    if (el.emptyState) {
+      el.emptyState.hidden = false;
+      if (el.emptyTitle) el.emptyTitle.textContent = 'Welcome to chatbox';
+      if (el.emptyText) el.emptyText.textContent = 'Select a chat from the sidebar or click + to start messaging.';
+    }
+    if (el.convTitle) el.convTitle.textContent = '';
+    if (el.convSub) el.convSub.textContent = '';
+    if (el.input) {
+      el.input.value = '';
+      el.input.disabled = true;
+    }
+    if (el.send) el.send.disabled = true;
+
     el.meName.textContent = state.user.name;
     el.mePhone.textContent = state.user.phone;
     renderAvatar(el.meAvatar, state.user.name, state.user.avatar_color, state.user.avatar_url);
@@ -1437,6 +1482,7 @@
     hideLoader();
     checkNotificationPrompt();
     initNativePush();
+    syncNativePushToken();
   }
 
   /* ------------------------------------------------------------- socket */
@@ -2011,9 +2057,16 @@
           if (window.innerWidth <= 768) {
             closeRail();
           }
-        } else if (!state.activeConversationId) {
+        } else {
           saveActiveConversation(null);
+          state.activeConversationId = null;
+          if (el.messages) el.messages.replaceChildren();
+          if (el.emptyState) el.emptyState.hidden = false;
         }
+      } else if (!state.activeConversationId) {
+        saveActiveConversation(null);
+        if (el.messages) el.messages.replaceChildren();
+        if (el.emptyState) el.emptyState.hidden = false;
       }
     } catch (err) {
       console.error('Load conversations error:', err);
@@ -2248,6 +2301,7 @@
     cancelEdit();
     clearMediaSelection();
     if (el.linkPreviewBar) el.linkPreviewBar.hidden = true;
+    if (el.messages) el.messages.replaceChildren();
 
     const conv = state.conversations.find((c) => c.id === convId);
     if (!conv) return;
@@ -7206,10 +7260,6 @@
     const conv = state.conversations.find((c) => c.id === state.activeConversationId);
     if (!conv || conv.type === 'group' || !conv.otherUserId) {
       return toast('Voice & video calls are available for direct 1-on-1 chats');
-    }
-
-    if (!conv.isOnline) {
-      return toast(`${conv.name} is currently offline`);
     }
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {

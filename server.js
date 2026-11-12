@@ -934,7 +934,7 @@ const routeContext = {
   authMiddleware, adminMiddleware, sanitizePhone, normalizePhoneForStorage,
   getPhoneVariants, arePhonesMatching, findUserByPhone, hashPassword, verifyPassword,
   generateToken, getUserById, areFriends, getMessagesReactions, upload,
-  persistMediaFile, processUploadedFile,
+  persistMediaFile, processUploadedFile, cleanupCall, activeCalls, userActiveCalls,
 };
 /* --------------------------------------------------------------- API routes */
 
@@ -1090,31 +1090,49 @@ io.on('connection', async (socket) => {
     console.error('Socket join rooms error:', err);
   }
 
-  // Notify if user has an active call session awaiting reconnection
+  // Notify if user has an active call session awaiting reconnection or incoming ring
   if (userActiveCalls.has(user.id)) {
     const existingCallId = userActiveCalls.get(user.id);
     const existingCall = activeCalls.get(existingCallId);
-    if (existingCall && existingCall.status === 'active') {
-      const peerId = (existingCall.callerId === user.id) ? existingCall.calleeId : existingCall.callerId;
-      getUserById(peerId).then((peer) => {
-        socket.emit('call_active_session', {
-          callId: existingCall.id,
-          callerId: existingCall.callerId,
-          calleeId: existingCall.calleeId,
-          conversationId: existingCall.conversationId,
-          callType: existingCall.callType,
-          acceptedAt: existingCall.acceptedAt,
-          createdAt: existingCall.createdAt,
-          isInitiator: (existingCall.callerId === user.id),
-          peer: peer ? {
-            id: peer.id,
-            name: peer.name,
-            phone: peer.phone,
-            avatarUrl: peer.avatar_url,
-            avatarColor: peer.avatar_color,
-          } : null,
-        });
-      }).catch(() => {});
+    if (existingCall) {
+      if (existingCall.status === 'active') {
+        const peerId = (existingCall.callerId === user.id) ? existingCall.calleeId : existingCall.callerId;
+        getUserById(peerId).then((peer) => {
+          socket.emit('call_active_session', {
+            callId: existingCall.id,
+            callerId: existingCall.callerId,
+            calleeId: existingCall.calleeId,
+            conversationId: existingCall.conversationId,
+            callType: existingCall.callType,
+            acceptedAt: existingCall.acceptedAt,
+            createdAt: existingCall.createdAt,
+            isInitiator: (existingCall.callerId === user.id),
+            peer: peer ? {
+              id: peer.id,
+              name: peer.name,
+              phone: peer.phone,
+              avatarUrl: peer.avatar_url,
+              avatarColor: peer.avatar_color,
+            } : null,
+          });
+        }).catch(() => {});
+      } else if (existingCall.status === 'ringing' && existingCall.calleeId === user.id) {
+        getUserById(existingCall.callerId).then((caller) => {
+          if (!caller) return;
+          socket.emit('call_incoming', {
+            callId: existingCall.id,
+            caller: {
+              id: caller.id,
+              name: caller.name,
+              phone: caller.phone,
+              avatarUrl: caller.avatar_url,
+              avatarColor: caller.avatar_color,
+            },
+            conversationId: existingCall.conversationId,
+            callType: existingCall.callType,
+          });
+        }).catch(() => {});
+      }
     }
   }
 

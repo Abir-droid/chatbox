@@ -34,10 +34,13 @@ public class MainActivity extends BridgeActivity {
             }
 
             if (getBridge() != null && getBridge().getWebView() != null) {
-                getBridge().getWebView().postDelayed(() -> {
-                    String js = "window.dispatchEvent(new CustomEvent('native_call_action', { detail: { action: 'answer', callId: '" + (callId != null ? callId : "") + "', conversationId: '" + (convId != null ? convId : "") + "' } }));";
-                    getBridge().getWebView().evaluateJavascript(js, null);
-                }, 800);
+                final String safeCallId = callId != null ? callId : "";
+                final String safeConvId = convId != null ? convId : "";
+                final String js = "window._autoAnswerCallId = '" + safeCallId + "';" +
+                    "window.dispatchEvent(new CustomEvent('native_call_action', { detail: { action: 'answer', callId: '" + safeCallId + "', conversationId: '" + safeConvId + "' } }));";
+                getBridge().getWebView().postDelayed(() -> getBridge().getWebView().evaluateJavascript(js, null), 400);
+                getBridge().getWebView().postDelayed(() -> getBridge().getWebView().evaluateJavascript(js, null), 1200);
+                getBridge().getWebView().postDelayed(() -> getBridge().getWebView().evaluateJavascript(js, null), 2400);
             }
         }
     }
