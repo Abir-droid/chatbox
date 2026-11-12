@@ -152,10 +152,6 @@ async function sendCallPush(pool, targetUserId, callData) {
 
   const message = {
     tokens,
-    notification: {
-      title: `Incoming ${callType} Call`,
-      body: `${callerName} is calling…`
-    },
     data: {
       type: 'incoming_call',
       callId: String(callData.callId || ''),
@@ -168,14 +164,7 @@ async function sendCallPush(pool, targetUserId, callData) {
       timestamp: String(Date.now())
     },
     android: {
-      priority: 'high',
-      notification: {
-        channelId: 'incoming_calls',
-        sound: 'default',
-        priority: 'max',
-        visibility: 'public',
-        clickAction: 'FCM_PLUGIN_ACTIVITY'
-      }
+      priority: 'high'
     }
   };
 
@@ -298,11 +287,18 @@ async function sendMessagePush(pool, recipientUserIds, msgData) {
   }
 }
 
+async function hasReachableDevice(pool, userId) {
+  const tokens = await getTokensForUsers(pool, [userId]);
+  return Boolean(tokens && tokens.length > 0);
+}
+
 module.exports = {
   initFirebase,
   initPushSchema,
   registerToken,
   unregisterToken,
+  getTokensForUsers,
+  hasReachableDevice,
   sendCallPush,
   sendCallDismissPush,
   sendMessagePush

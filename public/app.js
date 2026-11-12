@@ -1348,6 +1348,15 @@
   function logout() {
     cleanupCallState();
     saveActiveConversation(null);
+    try {
+      localStorage.removeItem('chatbox_token');
+      localStorage.removeItem('chatbox_active_conv');
+      sessionStorage.clear();
+      if (window.location.hash) {
+        history.replaceState(null, '', window.location.pathname);
+      }
+    } catch (e) {}
+
     if (state.nativePushToken) {
       api('/api/push/unregister', {
         method: 'POST',
@@ -1358,7 +1367,28 @@
     }
     state.token = '';
     state.user = null;
-    localStorage.removeItem('chatbox_token');
+    state.conversations = [];
+    state.friends = [];
+    state.friendRequests = [];
+    state.activeConversationId = null;
+    state.messagesCache.clear();
+    state.selectedMessageIds.clear();
+    state.selectedForwardTargets.clear();
+    state.selectedGroupFriends.clear();
+    state.typers.clear();
+
+    if (el.chatList) el.chatList.replaceChildren();
+    if (el.messages) el.messages.replaceChildren();
+    if (el.friendList) el.friendList.replaceChildren();
+    if (el.requestsList) el.requestsList.replaceChildren();
+    if (el.emptyState) {
+      el.emptyState.hidden = false;
+      if (el.emptyTitle) el.emptyTitle.textContent = 'Welcome to chatbox';
+      if (el.emptyText) el.emptyText.textContent = 'Select a chat from the sidebar or click + to start messaging.';
+    }
+    if (el.convTitle) el.convTitle.textContent = '';
+    if (el.convSub) el.convSub.textContent = '';
+
     if (socket) socket.disconnect();
     el.app.hidden = true;
     el.authScreen.hidden = false;
@@ -7263,7 +7293,27 @@
         el.incomingCallDialog.open = true;
       }
     }
+
+    if (window._autoAnswerCallId === data.callId) {
+      window._autoAnswerCallId = null;
+      setTimeout(() => acceptIncomingCall(), 250);
+    }
   }
+
+  window.addEventListener('native_call_action', (e) => {
+    const detail = (e && e.detail) || {};
+    if (detail.action === 'answer') {
+      if (detail.conversationId) {
+        openConversation(Number(detail.conversationId));
+      }
+      if (incomingCallData && incomingCallData.callId === detail.callId) {
+        acceptIncomingCall();
+      } else if (detail.callId) {
+        window._autoAnswerCallId = detail.callId;
+        setTimeout(() => { window._autoAnswerCallId = null; }, 15000);
+      }
+    }
+  });
 
   async function acceptIncomingCall() {
     if (!incomingCallData) return;

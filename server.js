@@ -1520,7 +1520,10 @@ io.on('connection', async (socket) => {
       userActiveCalls.delete(user.id);
     }
 
-    if (!onlineUsers.has(targetUserId)) {
+    const isOnline = onlineUsers.has(targetUserId);
+    const hasDevice = await pushService.hasReachableDevice(pool, targetUserId);
+
+    if (!isOnline && !hasDevice) {
       return reply({ ok: false, error: 'User is currently offline' });
     }
 
