@@ -1174,8 +1174,9 @@ io.on('connection', async (socket) => {
       }
 
       // Check direct conversation friend permission (Non-friends cannot message)
-      const convRes = await pool.query('SELECT type FROM chat_conversations WHERE id = $1', [convId]);
-      if (convRes.rows.length && convRes.rows[0].type === 'direct') {
+      const convRes = await pool.query('SELECT type, name FROM chat_conversations WHERE id = $1', [convId]);
+      const conv = convRes.rows[0];
+      if (conv && conv.type === 'direct') {
         const otherMem = await pool.query(
           'SELECT user_id FROM chat_conversation_members WHERE conversation_id = $1 AND user_id != $2 LIMIT 1',
           [convId, user.id]
@@ -1281,8 +1282,8 @@ io.on('connection', async (socket) => {
         conversationId: convId,
         text: snippetText,
         mediaType,
-        isGroup: conv.type === 'group',
-        groupName: conv.type === 'group' ? conv.name : null,
+        isGroup: Boolean(conv && conv.type === 'group'),
+        groupName: (conv && conv.type === 'group') ? conv.name : null,
       }).catch((e) => console.warn('[FCM] Push send error:', e.message));
 
       reply({ ok: true, id: msg.id, tempId });
